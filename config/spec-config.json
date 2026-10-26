@@ -1,0 +1,8 @@
+{
+  "method": "dspark",
+  "num_speculative_tokens": 3,
+  "attention_backend": "TRITON_ATTN",
+  "kv_cache_dtype": "fp8",
+  "draft_sample_method": "probabilistic",
+  "rejection_sample_method": "block"
+}
