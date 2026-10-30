@@ -91,3 +91,37 @@ contradicting itself.
 service-availability decision, not a configuration change.** Raising the budget
 means taking memory from the services that share the box, and that is the
 operator's call, not the recipe's.
+
+## The tenant change: the budget un-frozen
+
+The 0.78 budget was never an engine limit; it was a **co-tenant limit**. The
+pricing that fixed the budget recorded it plainly: one more step (about
+1.2 GiB of host memory per box) put the ring's tightest box under its guard
+floor *in the layout where the model boxes also carried heavier co-tenant
+services* — a lane-killing shortfall measured in the field, when a
+co-tenant's memory growth pushed the tightest box under its floor and the
+guard killed the lane. The rejection was correct for that layout.
+
+The layout then changed. The heavier co-tenant services moved to a dedicated
+host of their own, off the model boxes entirely; the model boxes now carry
+only their light GPU tenants (one embedder, one small service, the head
+bare). Every box's shipped free memory rose by multiples of the step the
+budget was asking for, and the rejection's premise — the only reason 0.80
+was refused — is void.
+
+So the profile steps: **GMU 0.78 → 0.80**, with the capture-grid cap
+unchanged. At 0.80 the pool reads roughly **266,000 tokens**: about **2.0x**
+concurrency at a 131,072-token request, about **1.35x** at the served
+196,608 — the same pool that the context rung priced at the longer
+denominator, read against a shorter one. A 262,144-token request now fits
+the pool where at 0.78 it did not; it still buys almost no concurrency, so
+the served context stays 196,608.
+
+The profile is arithmetic-plus-guard, not a new magic number: the boot-time
+capture gate pins 0.80 and verifies the budget on all four surfaces (the
+pin, the recipe default, the container env, and the engine's own resolved
+value on every rank), the guard enforces the floors on every box for the
+whole session, and the acceptance rule judges the run from the boot's own
+evidence. A future layout that puts heavy tenants back on the boxes owes
+this file the same honesty: re-price, lower `GMU`, and let the guard be the
+arbiter.

@@ -192,7 +192,7 @@ def capture_gate_text() -> str:
         out.append("[GATE] spec_file=yes")
         out.append("[GATE] spec_file_method=yes")
         out.append("[GATE] spec_file_k=yes")
-        out.append("[GATE] gmu=0.78")
+        out.append("[GATE] gmu=0.80")
         # THE CAPACITY FACTS ARE PUBLISHED BY THE HEAD ONLY. A worker has no
         # engine config dump, so the shipped gate publishes an EMPTY value
         # for the pool and the concurrency -- and a fixture that published a

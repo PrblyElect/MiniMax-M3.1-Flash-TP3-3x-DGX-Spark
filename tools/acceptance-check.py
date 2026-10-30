@@ -399,12 +399,13 @@ CROSSCHECK_DRIFT_MAX_PCT = 1.0
 # ══ THE MEMORY GUARD FLOORS ══════════════════════════════════════════════
 # The guard is armed at a per-rank floor, and its running minimum has to
 # stay above that floor for the whole window. The floors are NOT lowered to
-# make a boot survive: the budget change gives every rank roughly 1.8 GB
-# of headroom back (0.795 -> 0.78 of the box's ~122 GiB), so each floor now sits
-# well below that rank's expected drifted minimum instead of a hair above
-# its measured one. Lowering the fence to make a boot survive would be the
-# wrong repair; the budget was the thing that was wrong. Why each floor
-# carries the value it does: docs/FIXLOG.md.
+# make a boot survive: the co-tenant change (heavier services off the model
+# boxes, the 0.78 -> 0.80 step in docs/FIXLOG.md) gives every rank headroom
+# back in multiples of the step, so each floor now sits well below that
+# rank's expected drifted minimum instead of a hair above its measured one.
+# Lowering the fence to make a boot survive would be the wrong repair; the
+# budget was the thing that was wrong. Why each floor carries the value it
+# does: docs/FIXLOG.md.
 GUARD_FLOORS = {
     "spark-head.local": 4096,
     "spark-a.local": 3584,
@@ -428,7 +429,7 @@ HEAD_BOX = "spark-head.local"
 #    config. A rank that booted with a different budget would have a
 #    different KV pool size inside the TP ring -- a rank asymmetry that
 #    looks like the change itself.
-EXPECTED_GMU = "0.78"
+EXPECTED_GMU = "0.80"
 # 2. THE MEASUREMENT PATH: the baseline path. The TTFT criterion is judged
 #    on rows measured over this path, and the rule FAILS if no such row
 #    exists (a missing measurement is a FAIL). AND the DRIVER'S OWN RECORD
@@ -3207,7 +3208,7 @@ def main() -> int:
     #     kv_concurrency_ctx=<N>` line. The gate strips the commas itself
     #     (tools/capture-config.sh), so in real evidence it reads "196608".
     #   * the ENGINE'S OWN boot line inside the gate's capture -- "Maximum
-    #     concurrency for 196,608 tokens per request: 1.06x". That is the
+    #     concurrency for 196,608 tokens per request: 1.35x". That is the
     #     raw engine output, and it is GROUPED.
     #
     # BOTH ARE READ, ALWAYS. The prose used to be a FALLBACK -- read only

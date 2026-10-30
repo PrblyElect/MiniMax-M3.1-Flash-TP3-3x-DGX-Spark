@@ -102,7 +102,7 @@ CONCURRENCY_MIN=${CONCURRENCY_MIN:-1.00}
 # The memory budget this profile pins. It is PINNED, never derived from the
 # box: a stale kit could otherwise agree with itself and PASS. GMU is NOT
 # raised to buy the pool back.
-EXPECTED_GMU_PINNED="${EXPECTED_GMU_PINNED:-0.78}"
+EXPECTED_GMU_PINNED="${EXPECTED_GMU_PINNED:-0.80}"
 # The spec config this profile pins.
 SPEC_METHOD=${SPEC_METHOD:-dspark}
 SPEC_K=${SPEC_K:-3}
@@ -598,7 +598,7 @@ KV_GIB=$(grep -oE "Available KV cache memory: [0-9.]+ GiB" "$TMP" | tail -1 | gr
 # out of the SAME line rather than assumed.
 CONC_LINE=$(grep -oE "Maximum concurrency for [0-9,]+ tokens per request: [0-9.]+x" "$TMP" | tail -1 || true)
 # THE MULTIPLIER IS A FIGURE OR IT IS NOT. The engine prints it as a decimal
-# ("1.06x") and the token is read WHOLE, off the engine's own line, so the
+# ("1.35x") and the token is read WHOLE, off the engine's own line, so the
 # figure this gate compares against a floor is the figure the engine wrote.
 # A token that is not a well-formed decimal is not a figure this gate may
 # publish or compare -- and the token is NAMED rather than trimmed into

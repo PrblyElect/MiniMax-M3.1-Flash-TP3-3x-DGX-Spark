@@ -46,7 +46,7 @@ fi
 
 export ROLE NODE_RANK NODE_IP
 export HEAD_IP="${HEAD_IP:-192.168.0.10}"
-export TP="${TP:-3}" CTX="${CTX:-196608}" GMU="${GMU:-0.78}" PORT="${PORT:-8100}"
+export TP="${TP:-3}" CTX="${CTX:-196608}" GMU="${GMU:-0.80}" PORT="${PORT:-8100}"
 # the capture-grid cap rides the same chain as the budget -- an environment
 # argument, unset by default (the engine's own default grid).
 export CGCAP="${CGCAP:-}"

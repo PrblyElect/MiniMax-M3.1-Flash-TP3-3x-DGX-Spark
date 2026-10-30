@@ -61,7 +61,7 @@ deliberately: they are the recipe's spec claims, not a benchmark report.
 | prefill (a ~8K-token prompt) | **~1,500 tok/s** |
 | time to first token | **~0.5 s** |
 | per-token latency | **~38 ms** |
-| KV pool | **~208K tokens** — **1.06×** a 196,608-token request (the same pool is **1.6×** a 131,072-token one) |
+| KV pool | **~266K tokens** — **1.35×** a 196,608-token request (the same pool is **2.0×** a 131,072-token one) |
 | capture pool per rank | **under 1 GiB**, against the engine's own estimate of ~2 GiB |
 | draft acceptance, prose | **~0.60 / ~0.30 / ~0.14** per position |
 | draft acceptance, long reasoning chains | **~0.99 / ~0.96 / ~0.94** per position |
@@ -84,7 +84,7 @@ present and readable.
 
 **The pool is the capacity story, not the throughput story.** The engine's own
 concurrency figure is a property of **(pool / request length)**: the same
-pool reads ~1.6× at a 131,072-token request and ~1.06× at 196,608, because a
+pool reads ~2.0× at a 131,072-token request and ~1.35× at 196,608, because a
 request at the longer context uses almost all of it. At 196,608 the lane
 holds **one full-length request, not two** — that is the price of the longer
 context, and it is paid in concurrency, not in pool: the pool itself did not
@@ -347,10 +347,16 @@ other services on the box, the activation peak and the capture pool.
 
 The engine says so itself, in its own boot log: it prints the KV size that
 would "fully utilize gpu memory", which on the head is a little over twice
-what this profile serves. Reaching it means taking the host memory that the
-OS and the co-tenants hold — which is a **service-availability decision**, not
-a configuration change, and the reason this recipe's budget is conservative
-rather than greedy.
+what this profile serves. What bounds the budget is the HOST headroom every
+box keeps above its guard floor, and that is a property of the **co-tenant
+layout**, not of the engine. This profile (0.80) assumes the model boxes
+carry only light GPU tenants — an embedder on one rank, one small service
+on another, the head bare. In a layout where the model boxes also carry
+heavier co-tenant services (a chat UI, document parsing, speech services),
+the same 0.80 puts the tightest box under its floor and the guard kills the
+lane; drop `GMU` in `config/cluster.env` until every box clears its floor.
+The guard converting a too-greedy budget into a kill is the designed
+failure, not a bug.
 
 The honest summary: **on this model, a three-box Spark ring buys you
 throughput and a modest KV pool; it does not buy you a large-context server.**

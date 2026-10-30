@@ -87,7 +87,7 @@ TP="${TP:-3}"
 # is a fraction of the box's total, and everything the engine holds -- the
 # weights, the KV pool, the capture pool, the activation peak -- comes out
 # of the same pot. A higher budget is not free; see ../docs/FIXLOG.md.
-GMU="${GMU:-0.78}"
+GMU="${GMU:-0.80}"
 # The context the lane serves. This must match what the KV pool can hold:
 # a context twice this size does not fit the pool, and the engine refuses
 # the request rather than degrading.
@@ -234,7 +234,7 @@ exec vllm serve /model \
   --master-port "${DIST_MASTER_PORT:-25000}" \
   ${HEADLESS_FLAG} \
   --max-model-len "${CTX:-196608}" \
-  --gpu-memory-utilization "${GMU:-0.78}" \
+  --gpu-memory-utilization "${GMU:-0.80}" \
   --served-model-name "${SERVED_NAME:-minimax31-flash}" "${ALIAS_NAME:-main}" \
   --port "${PORT:-8100}" \
   --block-size 128 \

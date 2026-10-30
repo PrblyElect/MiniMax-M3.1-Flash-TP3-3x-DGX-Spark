@@ -113,8 +113,8 @@ the profile is invisible until the engine prints it. The one that matters
 most is the served context: asking for twice what the pool holds produces a
 request-time refusal, not a warning. **The concurrency figure is read
 together with its denominator**, because the engine prints it *for the
-request length it was asked about*: the same pool reads ~1.6x at 131,072
-tokens and ~1.06x at 196,608, and comparing those two numbers as if they
+request length it was asked about*: the same pool reads ~2.0x at 131,072
+tokens and ~1.35x at 196,608, and comparing those two numbers as if they
 measured the same thing would be wrong in both directions.
 
 **Quote the engine's own pool**, from its boot log's KV-size line — never an

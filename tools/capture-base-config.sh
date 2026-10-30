@@ -253,8 +253,8 @@ fi
 # must agree, or the box is not running the recipe:
 #   1. EXPECTED_GMU_PINNED -- the budget THIS PROFILE must run at. It is
 #      PINNED HERE, not derived from the box: a box that still carries the
-#      OLD kit would otherwise agree with ITSELF (recipe 0.78 = container
-#      0.78 = engine 0.78) and the gate would PASS a boot that silently ran
+#      OLD kit would otherwise agree with ITSELF (recipe 0.80 = container
+#      0.80 = engine 0.80) and the gate would PASS a boot that silently ran
 #      at the wrong budget. That hole is recorded in docs/FIXLOG.md, and
 #      this line is its fix. Override it for a later profile.
 #   2. the RECIPE's default (read from launch/start-tp3.sh ON THIS BOX) -- so
@@ -262,9 +262,9 @@ fi
 #   3. the value the CONTAINER was actually given (docker inspect .Config.Env
 #      GMU=) -- so the boot did not silently override the recipe.
 #   4. the value the ENGINE resolved ("Desired GPU memory utilization is
-#      (0.78, ... GiB)", printed by EVERY rank's gpu_worker) -- so the
+#      (0.80, ... GiB)", printed by EVERY rank's gpu_worker) -- so the
 #      budget really took effect and was not clamped back.
-EXPECTED_GMU_PINNED="${EXPECTED_GMU_PINNED:-0.78}"
+EXPECTED_GMU_PINNED="${EXPECTED_GMU_PINNED:-0.80}"
 RECIPE_GMU=""
 for recipe_start in "$KIT/launch/start-tp3.sh" "$KIT/start-tp3.sh"; do
   [[ -f "$recipe_start" ]] || continue
