@@ -5,10 +5,10 @@ de4de2ce24ef474c59f37d6a8fb4f957  launch/start-tp3.sh
 008d94d6f467318f65a2692be9a75523  config/spec-config.json
 2726cc35f88b13a039dd3bcb57a8223d  patches/apply_mm31_tp3pads.py
 014f9066a363fe28c9aa430954563a3f  patches/verify-draft-pad.py
-b164e5646f501f7a26d9175911df9a9a  patches/tp3_pad_table.json
+0cbfe4c4773946976d229ae31c4edb93  patches/tp3_pad_table.json
 a4ee58f08452c8d6c409a2825f5cad52  patches/overlay/vllm_tp3_pad/__init__.py
 adf2f36a180af81ae37222178f808a7a  patches/overlay/vllm_tp3_pad/__main__.py
-b164e5646f501f7a26d9175911df9a9a  patches/overlay/vllm_tp3_pad/tp3_pad_table.json
+0cbfe4c4773946976d229ae31c4edb93  patches/overlay/vllm_tp3_pad/tp3_pad_table.json
 630e3cc036a3589d52257e23df441352  tools/guard-memory.sh
 561a39ad4465914d4e8d7b8cb7234fbe  tools/capture-config.sh
 2e27afe1776921661feaf1b7d2b3e28c  tools/capture-base-config.sh
