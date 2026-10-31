@@ -15,6 +15,10 @@
 #      both the gate and the serve line;
 #   5. starts the engine.
 #
+# PRINT_CMD=1 replaces step 5: it prints the exact `docker run` command this
+# script would execute -- one argument per line, then the whole command on
+# one line -- and exits 0. It starts nothing.
+#
 # The failure modes this script exists to prevent are documented in
 # ../docs/FIXLOG.md; the landmines are in ../README.md.
 set -euo pipefail
@@ -92,6 +96,22 @@ GMU="${GMU:-0.80}"
 # a context twice this size does not fit the pool, and the engine refuses
 # the request rather than degrading.
 CTX="${CTX:-196608}"
+# The serve knobs that used to be LITERALS on the serve line. A literal on the
+# serve line is not a knob: the profile of record could not reach it, and a
+# reader on a different stack had to edit the script to get a different block
+# size or batched-token budget. Each is read from the environment here, with
+# the SAME value the serve line hardcoded before as its default, so the
+# default is still the validated one.
+#
+# THE PROFILE OF RECORD PUBLISHES THESE (config/cluster.env). Change one
+# there and the profile it was validated against is gone: the capture gate's
+# uniform-decode coverage list is DERIVED from max_num_seqs x (k+1), and the
+# acceptance rule is priced against the block size and the batched-token
+# budget -- both have to be re-baselined, or they fail (by design).
+BLOCK_SIZE="${BLOCK_SIZE:-128}"
+KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-32}"
+MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-8192}"
 # The capture-grid cap, as a JSON list of sizes. UNSET means the engine's own
 # default grid, which costs roughly 15,000 tokens of KV pool in graphs this
 # lane never replays as decode graphs.
@@ -144,6 +164,16 @@ set -euo pipefail
 VLLM_SITE="$(python3 -c 'import vllm, os; print(os.path.dirname(os.path.dirname(vllm.__file__)))')"
 python3 /tp3pad/apply_mm31_tp3pads.py "$VLLM_SITE"
 python3 /tp3pad/apply_mm31_tp3pads.py "$VLLM_SITE" verify
+# THE OVERLAY MUST BE PROVEN TO HAVE LANDED. The kit verifies its own edits
+# semantically (markers, compile, behaviour); this hashes the patched files
+# AS THEY ARE IN THE CONTAINER -- post-overlay -- against the expected
+# hashes: the installed package must be byte-for-byte the recipe's own, and
+# every patched stock file must be byte-for-byte what the kit's edit
+# produces from the pristine backup. A boot whose overlay silently failed, or
+# whose tree carries a stale overlay from an earlier boot or a different kit,
+# fails HERE -- not in the window, and not silently.
+python3 /kit-md5.py --check-container --site "$VLLM_SITE" \
+  --kit-dir /tp3pad --manifest /kit-md5.txt
 # The speculative config is ONE file. It is read ONCE here, and the very same
 # string goes to the self-check AND to the serve line -- so the JSON the
 # engine receives is provably the file's content (the self-check compares the
@@ -237,13 +267,13 @@ exec vllm serve /model \
   --gpu-memory-utilization "${GMU:-0.80}" \
   --served-model-name "${SERVED_NAME:-minimax31-flash}" "${ALIAS_NAME:-main}" \
   --port "${PORT:-8100}" \
-  --block-size 128 \
-  --kv-cache-dtype fp8 \
+  --block-size "${BLOCK_SIZE:-128}" \
+  --kv-cache-dtype "${KV_CACHE_DTYPE:-fp8}" \
   --attention-config '{"indexer_kv_dtype": "fp8"}' \
   --compilation-config "${COMPILATION_CONFIG}" \
   --speculative-config "${SPEC_JSON}" \
-  --max-num-seqs 32 \
-  --max-num-batched-tokens 8192 \
+  --max-num-seqs "${MAX_NUM_SEQS:-32}" \
+  --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS:-8192}" \
   --limit-mm-per-prompt '{"video": 0}' \
   --reasoning-parser minimax_m3 \
   --enable-auto-tool-choice --tool-call-parser minimax_m3 \
@@ -255,49 +285,91 @@ EOF
 # ---------------------------------------------------------------- run
 # NOTE: no --rm on purpose -- a failed container is preserved for forward
 # diagnosis; stop and remove it explicitly.
-exec docker run \
-  --name "$CONTAINER_NAME" \
-  --network host \
-  --gpus all \
-  --device /dev/infiniband \
-  --ipc host \
-  --ulimit stack=67108864 \
-  --ulimit memlock=-1 \
-  --cap-add IPC_LOCK \
-  -e NODE_RANK="$NODE_RANK" \
-  -e DIST_MASTER_PORT="$DIST_MASTER_PORT" \
-  -e ROLE="$ROLE" \
-  -e NODE_IP="$NODE_IP" \
-  -e HEAD_IP="$HEAD_IP" \
-  -e CLUSTER_SIZE="$CLUSTER_SIZE" \
-  -e VLLM_HOST_IP="$NODE_IP" \
-  -e NCCL_DEBUG=INFO -e NCCL_DEBUG_SUBSYS=INIT,GRAPH,TUNING,COLL \
-  -e NCCL_DEBUG_FILE="/tmp/nccl-rank${NODE_RANK}.log" \
-  -e NCCL_NET=IB -e NCCL_IB_DISABLE=0 \
-  -e NCCL_IB_HCA="$NCCL_IB_HCA" \
-  -e NCCL_CROSS_NIC="$NCCL_CROSS_NIC" \
-  -e NCCL_IB_SUBNET_AWARE_ROUTING="$NCCL_IB_SUBNET_AWARE_ROUTING" \
-  -e NCCL_IB_SUBNET_PREFIX_LEN="$NCCL_IB_SUBNET_PREFIX_LEN" \
-  -e NCCL_IB_GID_AUTO="$NCCL_IB_GID_AUTO" -e NCCL_IB_MERGE_NICS="$NCCL_IB_MERGE_NICS" \
-  -e NCCL_SOCKET_IFNAME="$SOCKET_IFNAME" \
-  -e TP_SOCKET_IFNAME="$TP_SOCKET_IFNAME" -e GLOO_SOCKET_IFNAME="$GLOO_SOCKET_IFNAME" \
-  -e NCCL_CUMEM_ENABLE=0 -e NCCL_IGNORE_CPU_AFFINITY=1 \
-  -e NCCL_NVLS_ENABLE=0 -e NCCL_MAX_NCHANNELS="$NCCL_MAX_NCHANNELS" \
-  -e NCCL_IB_ADDR_FAMILY=AF_INET -e NCCL_IB_ROCE_VERSION_NUM="$NCCL_IB_ROCE_VERSION_NUM" \
-  -e NCCL_NET_GDR_LEVEL=LOC -e NCCL_NET_PLUGIN=none \
-  -e VLLM_TP3_PAD="$TP" \
-  -e VLLM_TP3_PAD_MODEL_TYPES="$VLLM_TP3_PAD_MODEL_TYPES" \
-  -e VLLM_TP3_PAD_TABLE=/tp3pad/tp3_pad_table.json \
-  -e VLLM_ENABLE_PCIE_ALLREDUCE="$VLLM_ENABLE_PCIE_ALLREDUCE" \
-  -e CUTE_DSL_ARCH="$CUTE_DSL_ARCH" \
-  -e PYTHONPYCACHEPREFIX=/tmp/pycache \
-  -e PORT="$PORT" -e TP="$TP" -e GMU="$GMU" -e CTX="$CTX" \
-  ${CGCAP_ENV[@]+"${CGCAP_ENV[@]}"} \
-  -e SERVED_NAME="$SERVED_NAME" \
-  -e ALIAS_NAME="$ALIAS_NAME" \
-  -e EXTRA_SERVE_ARGS="$EXTRA_SERVE_ARGS" \
-  -v "$MODEL_DIR:/model:ro" \
-  -v "$ROOT/patches:/tp3pad:ro" \
-  -v "$SPEC_FILE:/spec-config.json:ro" \
-  --entrypoint /bin/bash \
+#
+# THE COMMAND IS BUILT IN ONE PLACE. The array below IS the command: the copy
+# this script PRINTS (PRINT_CMD=1) and the copy it EXECUTES are the same
+# words, so the printed command cannot drift away from the running one. Every
+# value a reader wants to check -- the collective's fabric names, the serve
+# knobs, the mounts -- is in this array and nowhere else.
+#
+# The element order, the quoting and the word splitting are the pre-refactor
+# command's, unchanged: `-euo` and `pipefail` stay two separate elements
+# (bash reads them as the option cluster and its argument), and
+# EXTRA_SERVE_ARGS stays UNQUOTED so it still word-splits into its own
+# arguments.
+run_args=(
+  --name "$CONTAINER_NAME"
+  --network host
+  --gpus all
+  --device /dev/infiniband
+  --ipc host
+  --ulimit stack=67108864
+  --ulimit memlock=-1
+  --cap-add IPC_LOCK
+  -e NODE_RANK="$NODE_RANK"
+  -e DIST_MASTER_PORT="$DIST_MASTER_PORT"
+  -e ROLE="$ROLE"
+  -e NODE_IP="$NODE_IP"
+  -e HEAD_IP="$HEAD_IP"
+  -e CLUSTER_SIZE="$CLUSTER_SIZE"
+  -e VLLM_HOST_IP="$NODE_IP"
+  -e NCCL_DEBUG=INFO -e NCCL_DEBUG_SUBSYS=INIT,GRAPH,TUNING,COLL
+  -e NCCL_DEBUG_FILE="/tmp/nccl-rank${NODE_RANK}.log"
+  -e NCCL_NET=IB -e NCCL_IB_DISABLE=0
+  -e NCCL_IB_HCA="$NCCL_IB_HCA"
+  -e NCCL_CROSS_NIC="$NCCL_CROSS_NIC"
+  -e NCCL_IB_SUBNET_AWARE_ROUTING="$NCCL_IB_SUBNET_AWARE_ROUTING"
+  -e NCCL_IB_SUBNET_PREFIX_LEN="$NCCL_IB_SUBNET_PREFIX_LEN"
+  -e NCCL_IB_GID_AUTO="$NCCL_IB_GID_AUTO" -e NCCL_IB_MERGE_NICS="$NCCL_IB_MERGE_NICS"
+  -e NCCL_SOCKET_IFNAME="$SOCKET_IFNAME"
+  -e TP_SOCKET_IFNAME="$TP_SOCKET_IFNAME" -e GLOO_SOCKET_IFNAME="$GLOO_SOCKET_IFNAME"
+  -e NCCL_CUMEM_ENABLE=0 -e NCCL_IGNORE_CPU_AFFINITY=1
+  -e NCCL_NVLS_ENABLE=0 -e NCCL_MAX_NCHANNELS="$NCCL_MAX_NCHANNELS"
+  -e NCCL_IB_ADDR_FAMILY=AF_INET -e NCCL_IB_ROCE_VERSION_NUM="$NCCL_IB_ROCE_VERSION_NUM"
+  -e NCCL_NET_GDR_LEVEL=LOC -e NCCL_NET_PLUGIN=none
+  -e VLLM_TP3_PAD="$TP"
+  -e VLLM_TP3_PAD_MODEL_TYPES="$VLLM_TP3_PAD_MODEL_TYPES"
+  -e VLLM_TP3_PAD_TABLE=/tp3pad/tp3_pad_table.json
+  -e VLLM_ENABLE_PCIE_ALLREDUCE="$VLLM_ENABLE_PCIE_ALLREDUCE"
+  -e CUTE_DSL_ARCH="$CUTE_DSL_ARCH"
+  -e PYTHONPYCACHEPREFIX=/tmp/pycache
+  -e PORT="$PORT" -e TP="$TP" -e GMU="$GMU" -e CTX="$CTX"
+  -e BLOCK_SIZE="$BLOCK_SIZE" -e KV_CACHE_DTYPE="$KV_CACHE_DTYPE"
+  -e MAX_NUM_SEQS="$MAX_NUM_SEQS" -e MAX_NUM_BATCHED_TOKENS="$MAX_NUM_BATCHED_TOKENS"
+  ${CGCAP_ENV[@]+"${CGCAP_ENV[@]}"}
+  -e SERVED_NAME="$SERVED_NAME"
+  -e ALIAS_NAME="$ALIAS_NAME"
+  -e EXTRA_SERVE_ARGS="$EXTRA_SERVE_ARGS"
+  -v "$MODEL_DIR:/model:ro"
+  -v "$ROOT/patches:/tp3pad:ro"
+  -v "$ROOT/kit-md5.py:/kit-md5.py:ro"
+  -v "$ROOT/kit-md5.txt:/kit-md5.txt:ro"
+  -v "$SPEC_FILE:/spec-config.json:ro"
+  --entrypoint /bin/bash
   "$IMAGE" -euo pipefail -c "$BOOTSTRAP"
+)
+
+# READ THE COMMAND WITHOUT STARTING IT. PRINT_CMD=1 prints the exact argv
+# this script would hand to docker -- one argument per line, then the whole
+# command on one copy-pasteable line -- and exits 0. It starts NOTHING: no
+# container, no GPU, no image, no boot. It is how a reader checks that every
+# value in the profile of record actually REACHED the container, without
+# occupying a box to find out.
+#
+# The check sits IMMEDIATELY above the exec, so there is no path through this
+# script that reaches `docker run` while PRINT_CMD is set.
+if [[ "${PRINT_CMD:-0}" == "1" ]]; then
+  echo "--- docker run argv: one argument per line ---"
+  for arg in "${run_args[@]}"; do
+    printf '%s\n' "$arg"
+  done
+  echo "--- the same command, copy-pasteable ---"
+  printf 'docker run'
+  for arg in "${run_args[@]}"; do
+    printf ' %q' "$arg"
+  done
+  printf '\n'
+  exit 0
+fi
+
+exec docker run "${run_args[@]}"

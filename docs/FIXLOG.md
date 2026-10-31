@@ -41,11 +41,11 @@ measured in.
 | 16 | the capture grid, capped at 128 | **kept** | the capture estimate and the real pool fall together, and the freed estimate becomes KV capacity at approximately zero price in host memory: the pool grows by about 15,000 tokens (roughly 8% of the pool it had before the cap) with the host budget unmoved, and the decode hot path is untouched |
 | 17 | the memory budget, one step up | **rejected on the arithmetic** | on a unified-memory box the budget is host memory, and the tightest box does not have the headroom. In a measurement window it would have passed; in the shipped state the guard would fire. The price is written out per box in this file's last section |
 | 18 | the capture-estimate flag (turn the estimate off) | **rejected on the arithmetic** | it frees the whole estimate but the real pool then lands on top of the budget, so it costs real memory the lane does not have |
-| 19 | the dspark verification budget (adaptive verification) | **closed by the engine** | the physics says it should matter — on prose the third draft position is worth about 0.03 tokens per step — but this lane's attention backends declare uniform-batch cudagraph support and cannot replay variable-length verification, so the engine refuses it at startup. The refusal is the engine's own; the rung was never booted |
+| 19 | the dspark verification budget (adaptive verification) | **closed by the engine** | the physics says it should matter — on prose the third draft position is worth about 0.03 tokens per step — but this recipe's attention backends declare uniform-batch cudagraph support and cannot replay variable-length verification, so the engine refuses it at startup. The refusal is the engine's own; the rung was never booted |
 | 20 | a lower capture ceiling still | **priced and declined** | worth roughly 3,000 tokens, which does not move the lane off a single full-length request, and it spends the draft path's entire safety margin |
 | 21 | synthetic rejection sampling | **rejected on correctness** | it accepts draft tokens on a calibrated probability instead of verifying them, so the output is no longer sampled from the model being served |
-| 22 | greedy draft sampling, parallel drafting | **not taken / closed** | greedy matches a greedy target and this lane serves a stochastic one; the draft is not trained for parallel drafting |
-| 23 | the served context, 131,072 → 196,608 | **kept** | the pool is sized by the memory budget, not by the context, so a longer context costs CONCURRENCY, not pool: the engine's own figure goes from ~1.6x to ~1.06x and the lane still holds one full-length request. The rule and the capture gate were re-based with it — the concurrency figure is now read together with its denominator, and the gate checks the engine's own `max_seq_len` against the pinned context, which it did not do before |
+| 22 | greedy draft sampling, parallel drafting | **not taken / closed** | greedy matches a greedy target and this recipe serves a stochastic one; the draft is not trained for parallel drafting |
+| 23 | the served context, 131,072 → 196,608 | **kept** | the pool is sized by the memory budget, not by the context, so a longer context costs CONCURRENCY, not pool: on the pool this rung was measured against (the 0.78-era budget, roughly 209k tokens) the engine's own figure goes from ~1.6x to ~1.06x and the lane still holds one full-length request. The rule and the capture gate were re-based with it — the concurrency figure is now read together with its denominator, and the gate checks the engine's own `max_seq_len` against the pinned context, which it did not do before |
 | 24 | a served context of 262,144 | **rejected on the arithmetic — do not retry** | it does not fit the pool: one request would need more tokens than the pool holds, and the engine refuses at request time rather than warning at boot. The context that fits is bounded by the pool, and the pool is bounded by the model |
 | 25 | quantising the KV cache to 4 bits to buy context | **not taken / closed** | the KV cache is the one thing that must not lose fidelity: a quantised cache is a different model. It was never tried, because the quality cost of a 4-bit cache was never shown to be zero, and "not visible in the acceptance numbers" is not "zero". The context was bought with concurrency instead, which costs no quality at all |
 | 26 | the capture gate proved the served context from the API server's echo of what was ASKED for | the echo is the REQUEST; the engine's own resolved config is the FACT IN FORCE, and they can disagree | **fixed**: the gate reads the engine's own `max_seq_len` and NAMES a disagreement, so a lane serving the wrong context is rejected by name rather than accepted |
@@ -112,8 +112,9 @@ was refused — is void.
 So the profile steps: **GMU 0.78 → 0.80**, with the capture-grid cap
 unchanged. At 0.80 the pool reads roughly **266,000 tokens**: about **2.0x**
 concurrency at a 131,072-token request, about **1.35x** at the served
-196,608 — the same pool that the context rung priced at the longer
-denominator, read against a shorter one. A 262,144-token request now fits
+196,608 — a larger pool than the one the context rung was priced against
+(rung 23 measured the 0.78-era pool), read against the same denominators.
+A 262,144-token request now fits
 the pool where at 0.78 it did not; it still buys almost no concurrency, so
 the served context stays 196,608.
 
@@ -125,3 +126,28 @@ whole session, and the acceptance rule judges the run from the boot's own
 evidence. A future layout that puts heavy tenants back on the boxes owes
 this file the same honesty: re-price, lower `GMU`, and let the guard be the
 arbiter.
+
+## The desk ladder: what a reader inherits (no boot, no window)
+
+These rungs were not booted and did not need to be: each one is a place
+where the recipe as published could mislead, mislead silently, or fail
+closed on something that was never wrong. They are recorded here in the
+same shape as the boot ladder — symptom, root cause, fix — because a
+reader who finds one of them in the wild deserves to know it was found on
+paper.
+
+| # | Symptom | Root cause | Fix |
+|---|---|---|---|
+| 27 | a reader on a different mesh cannot change the collective's HCA pair | `config/cluster.env` assigned `NCCL_IB_HCA` as a plain value, so it clobbered an exported pair before the launcher ever read it — and the launcher was already reading the overridable form | the assignment takes the overridable form, with the shipped pair as its default: an exported pair wins, and a same-mesh reader still gets the shipped one |
+| 28 | a reader on a different mesh fails the all-reduce with no clue | the README's "edit the profile for your site" list never mentioned the fabric, and `ibdev2netdev` appeared nowhere in the recipe | the fabric is named in that list and in the landmines, with the command that discovers the device names |
+| 29 | the serve knobs could not be changed without editing the script | the block size, the KV dtype, the sequence count and the batched-token budget were literals on the serve line, so the profile of record could not reach them | each is an environment knob with the validated value as its default, and the profile of record publishes all four |
+| 30 | a boot whose overlay silently failed is a boot that serves the wrong tree | the pad kit is applied in-container before anything starts, and nothing proved it landed — the kit's own verify checks its edits semantically, not byte for byte | the manifest gained a container view: the installed package is hashed against the recipe's own bytes, and every patched stock file against the kit's own re-derived edit. It runs at boot, and a selftest proves the check can fail |
+| 31 | a short prompt can be answered with deterministic garbage and nothing notices | the upstream dispatch check classifies a prefill as a uniform-decode step by shape alone; with k=3 the trap window is four tokens, and the lane serves short chat turns | a gate sends a prompt of exactly the engine's own `uniform_decode_query_len` tokens, and the same probe one token longer, and requires both to answer |
+| 32 | a long prompt can differ from the same prompt served from cache, and nothing notices | the validation flow exercised no long prompt at all | a gate sends a prompt that crosses the batched-token budget three times — cold, then twice with the prefix cache warm — and compares the generated token sequences |
+| 33 | the reader cannot see what the speculative-decode posture inherits | the posture itself (dspark k=3, a Triton attention backend, an fp8 KV cache) lived in the config and not in the prose | the two upstream defects that sit on that posture are documented, with what this recipe inherits and what the available evidence says it does not |
+| 34 | the container command could only be seen by starting it | the `docker run` was built in place, so the only way to read it was to run it | the command is built in one array and executed from it, and `PRINT_CMD=1` prints it — one argument per line, then the whole command — and starts nothing |
+| 35 | the short-prompt gate could pass without ever asking the question | the nonce was eight hex characters — several tokens — and the trap window is four, so the question was pushed out of the prompt; the control prompt was built by slicing a shorter list, so it was not one token longer than the trap either | the probe now keeps the question whole and is padded to the exact length with a neutral token, the control is the trap plus one appended token, and a question that does not fit is a hard failure of the gate rather than a note |
+| 36 | the documented command for reading the container command could not run | the launcher needs a role, a rank and an address, and the documented line supplied neither | the wrapper that resolves them from the hostname map is documented, and the direct invocation is documented with the three values the start path passes |
+| 37 | an exported serve knob was silently discarded | the profile assigned the four serve knobs as plain values, so sourcing it overwrote the environment, while the same profile used the overridable form for the fabric | the four knobs use the same overridable form as the fabric, so an exported value survives the profile |
+| 38 | the upstream long-context citation read as if the defect applied here | the citation gave the class but not the scope, and the scope is what decides whether it applies | the citation now names the upstream model, topology, attention backend and the request-length regime, and the one axis this recipe does share is stated |
+| 39 | three figures in the acceptance rule and the ladder disagreed with the shipped profile | the pool was re-based from the 0.78 budget to 0.80 and the older numbers were left in the comments and in one rung | the figures are reconciled: the rung that was measured at the older pool says so, and the comments carry the shipped pool |

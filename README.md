@@ -110,7 +110,17 @@ cd "$RECIPE_DIR"
 export REMOTE_DIR='~/MiniMax-M3.1-Flash-TP3-3x-DGX-Spark'
 
 # 1. EDIT config/cluster.env for your site: the head's address, the
-#    checkpoint path, the guard floors, the image digest, the served context.
+#    checkpoint path, the guard floors, the image digest, the served context,
+#    the FABRIC and the serve knobs.
+#    THE FABRIC: NCCL_IB_HCA is the pair of InfiniBand/RoCE devices the
+#    collective rides, and the device names belong to your MESH, not to this
+#    recipe -- `ibdev2netdev` lists them (the left column is the device, the
+#    right one the netdev it rides). The shipped pair is this platform's two
+#    fabric HCAs; on a different mesh, export your own before sourcing:
+#        export NCCL_IB_HCA=<device>,<device>
+#    THE SERVE KNOBS: the block size, the KV dtype, the sequence count and
+#    the batched-token budget are read by the serve line, so a value edited
+#    here changes what the engine is asked for.
 #    EDIT IT ONCE, HERE -- the copy you ship to the boxes in step 5 is the
 #    one they read. Then source it in every shell that starts anything:
 set -a; . "$RECIPE_DIR/config/cluster.env"; set +a
@@ -229,6 +239,47 @@ rather than against itself. If you change a kit file, regenerate the manifest
 (`python3 kit-md5.py --write`), update that one line, and re-check the three
 boxes as in step 4.
 
+## Reading the container command without starting it
+
+`launch/start-tp3.sh` builds its `docker run` command in ONE place — a
+`run_args` array — and then executes that array. So the command it would
+run and the command it prints are the same words: the printed copy cannot
+drift away from the running one.
+
+**`PRINT_CMD=1` prints the command and starts nothing**: one argument per
+line, then the whole command on a single copy-pasteable line, then exit 0.
+No container, no GPU, no image, no boot. The check sits immediately above
+the `exec`, so there is no path through the script that reaches `docker run`
+while the variable is set.
+
+```sh
+# ON THE BOX YOU ARE ABOUT TO START. `boot-tp3.sh` is the wrapper that
+# resolves the box's role and address from the hostname map, so it is the
+# entry point that works on a box you have not configured by hand:
+PRINT_CMD=1 ./launch/boot-tp3.sh
+
+# OR, if you are running the launcher directly, give it the same three
+# values the start path gives it:
+PRINT_CMD=1 ROLE=head NODE_RANK=0 NODE_IP=192.168.0.10 ./launch/start-tp3.sh
+```
+
+**Why it is worth having.** This is how you check that every value in
+`config/cluster.env` actually REACHED the container — the collective's
+fabric device pair, the socket interfaces, the serve knobs, the context,
+the budget, the mounts — without occupying a box to find out. A value that
+is in the profile but not in the command is a value that is not in the
+engine, and this is where that shows up.
+
+Two things to know before you run it:
+
+* **Run it on the box being started.** The command is the box's command:
+  the head's address, the role and the rank come from that box's
+  environment. A command printed on your laptop is a command for a laptop.
+* **It asks for the same prerequisites a real boot does** — a staged
+  checkpoint and a readable speculative config — because it refuses to
+  print a command it could not run. Source the profile first, exactly as
+  the quick start does.
+
 ## The hardware this was proven on
 
 | | |
@@ -323,7 +374,14 @@ rejoin — relaunch them after a head restart.
 triangle, `NCCL_IB_SUBNET_AWARE_ROUTING=1` with a matching
 `NCCL_IB_SUBNET_PREFIX_LEN`, plus `NCCL_IB_GID_AUTO=1` and
 `NCCL_IB_MERGE_NICS=0`. A bare three-rank all-reduce probe is the fastest way
-to tell a fabric problem from an engine problem.
+to tell a fabric problem from an engine problem. **`NCCL_IB_HCA` is the fifth
+one and it is the one a different mesh gets wrong**: it is the pair of
+InfiniBand/RoCE devices the collective rides, the device names belong to
+your fabric, and `ibdev2netdev` is how you find them (the left column is the
+device to name here, the right one the netdev it rides). It is read in the
+overridable form, so an exported pair wins over the shipped one — and the
+shipped pair is this platform's two fabric HCAs, not a constant of the
+recipe.
 
 **13. Measurement hygiene: a measured prefix is not a cold prefix.** Prefix
 caching is on, the first request pays a JIT tax, and a cached prefix makes the
@@ -334,6 +392,76 @@ and splits the workload.
 **14. The engine prints the graph bars on the first rank only.** Per-rank
 symmetry has to be proven from each rank's own capture-pool actual-vs-estimate
 pair, not inferred from the head's bars.
+
+## The speculative-decode posture, and what it inherits
+
+This recipe serves **DSpark speculative decode with k=3**, and the profile
+pins the rest of the posture in `config/spec-config.json`: the attention
+backend is **`TRITON_ATTN`**, the KV cache dtype is **`fp8`**, and the
+draft samples probabilistically with block rejection. Two upstream defects
+sit directly on that posture, and a reader who serves this recipe inherits
+both of them until the engine stops carrying them.
+
+**One: the shape-only dispatch check (upstream vLLM #53051 —
+<https://github.com/vllm-project/vllm/issues/53051>).** With
+speculative decode on, the engine decides that a batch is a uniform-decode
+step by its SHAPE alone: a **prefill** whose scheduled token count happens
+to equal `uniform_decode_query_len * num_reqs` is dispatched as a uniform
+decode instead of as a prefill. The trap window is therefore the engine's
+own `uniform_decode_query_len`, and with k=3 that is **1 + k = 4 tokens**:
+a four-token prompt, one request, is the shape the check misreads. Upstream
+reproduced the consequence — deterministic garbage from the first generated
+token, and a collapsed draft acceptance rate — on a three-token prompt with
+MTP k=2, on a hybrid model whose recurrent layers lose their state when a
+prefill is dispatched as a decode.
+
+What this recipe inherits is the **dispatch class**, and it inherits it
+whatever the model: the check is a shape comparison, not a model
+comparison. What it does **not** inherit, on the evidence available, is the
+recurrent-state consequence — the upstream report is against models with
+linear-attention layers, and the upstream issue is filed against the V1 GPU
+model runner while this recipe's own boot gate proves the engine selected the
+**V2** runner (DSpark needs V2). That is a reason to keep checking, not a
+reason to stop: the gate below is cheap, and it is the only thing here that
+can tell a healthy engine from a poisoned one.
+
+**Two: long-context decode under speculative decode (upstream vLLM #60860 —
+<https://github.com/vllm-project/vllm/issues/60860>).**
+A worker there died with an unspecified CUDA launch failure during
+long-context decode with dspark speculative decode enabled and long
+requests in the batch. The upstream report is against **DeepSeek-V4.1-
+Flash** on a six-GPU H100/B200-class host with DP=3/TP=2, using the
+`FLASHMLA_SPARSE_DSV41` attention backend at a 64-token KV block size,
+and the trigger was **requests over 100k tokens**. This recipe is a
+different model on a different topology with a different attention
+backend (`TRITON_ATTN` at a 128-token block size), so the mechanism does
+not carry over — but the *request-length regime* does: this recipe serves
+196,608 tokens, so a request over 100k is reachable here, and that is
+the regime the upstream report describes. The failure mode is loud
+rather than silent, but it is expensive: it takes the lane down.
+
+**What the reader has to do with that.** Two gates ship with the recipe and
+both are **load-bearing** — a FAIL is a reason not to ship the lane, not a
+note:
+
+```sh
+# ON THE HEAD, while the lane is up. The short-prompt gate asks the engine
+# for a prompt of EXACTLY its own uniform_decode_query_len tokens (four, at
+# k=3) and for the same prompt one token longer, which is NOT the trap
+# shape. A shape-dependent answer is the defect.
+python3 tools/check-spec-decode-short-prompt.py
+
+# The long-prompt gate sends a prompt that crosses the batched-token budget
+# three times -- cold, then twice with the prefix cache warm -- and compares
+# the generated TOKEN sequences.
+python3 tools/check-long-prompt-determinism.py
+```
+
+Both read the engine's own state (the first reads the engine's own
+`uniform_decode_query_len` from the boot log the draft-pad gate prints) and
+both build their prompts from the engine's own token ids, so the token
+counts are exact and are asserted against the engine's own
+`usage.prompt_tokens`.
 
 ## What the ceiling actually is
 
@@ -413,6 +541,8 @@ launch/start-tp3.sh        the docker run + the in-container bootstrap
 launch/Dockerfile          base image + the ray layer
 kit-md5.py                 the repo<->box identity manifest (--write / --check)
 kit-md5.txt                the manifest itself: the digest every box must show
+                           (--check-container: the kit's files as they are in
+                           the container, hashed in place)
 patches/                   the TP=3 pad kit (see patches/README.md)
 tools/capture-config.sh    capture + gate the engine's RESOLVED configuration
 tools/capture-base-config.sh  the base capture gate it inherits
@@ -420,6 +550,8 @@ tools/acceptance-check.py  the acceptance rule (fails closed)
 tools/assemble-evidence.py turn the per-box evidence into the rule's aggregates
 tools/bench-decode.py      the bench harness (nonce-isolated, warmup-aware)
 tools/resolve-capture-grid.py  prove the capture cap against the derivation
+tools/check-spec-decode-short-prompt.py  the short-prompt correctness gate
+tools/check-long-prompt-determinism.py  the long-prompt determinism gate
 tools/guard-memory.sh      the unified-memory guard
 docs/FIXLOG.md             the ladder, including the rejections
 docs/VALIDATION.md         how to validate a boot, and what each gate proves

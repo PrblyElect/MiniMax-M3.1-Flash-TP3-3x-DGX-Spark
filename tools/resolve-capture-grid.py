@@ -99,6 +99,13 @@ EXPECTED_DRAFT = 14
 
 # The recipe's fixed engine settings (start-tp3.sh). Anything not listed here
 # does not touch the capture resolution.
+#
+# THESE MIRROR THE PROFILE OF RECORD. kv_cache_dtype, block_size,
+# max_num_seqs and max_num_batched_tokens are read by the serve line from
+# config/cluster.env (they were literals there once), so a reader who
+# changes one in the profile changes what the engine is asked for -- and
+# this table has to be changed with it, or the capture grid proved here is
+# the grid of a configuration the lane is not serving.
 BASE = dict(
     model="/model",
     tokenizer="/model",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bench-decode.py -- the measurement instrument for this lane.
+"""bench-decode.py -- the measurement instrument for this recipe.
 
 Three rules make its numbers mean something, and all three are load-bearing:
 

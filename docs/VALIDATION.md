@@ -27,6 +27,15 @@ doing something else.
   just staged hundreds of gigabytes will report a memory profile that does
   not match the one you are about to measure.
 * **Record the baseline** — the free memory of each box before the boot.
+* **Read the command before you start it.** `PRINT_CMD=1 ./launch/boot-tp3.sh`
+  prints the exact `docker run` this box would execute and starts nothing.
+  It is the cheapest check there is for the class of mistake that costs a
+  window: a value that is in the profile of record but not in the command
+  is a value that never reached the container. Run it on the box being
+  started. `boot-tp3.sh` is the wrapper that resolves the box's role and
+  address from the hostname map; if you invoke `start-tp3.sh` directly
+  instead, give it the same values the start path gives it
+  (`ROLE`/`NODE_RANK`/`NODE_IP`).
 
 ## 0b. Three measurement traps that cost real time
 
@@ -57,6 +66,8 @@ between a failed boot and a failed *window*.
 | `python3 patches/apply_mm31_tp3pads.py <site> verify` | the applied tree matches the pad table — the kit is idempotent, and a half-applied pad is worse than none |
 | `python3 patches/verify-draft-pad.py --model-dir ... --spec-config ... --served-spec-json ...` | the **draft head** is padded to TP=3, proved from the real engine path: the real config loader, the real speculative-config promotion, the real pad hook, the real checkpoint's tensor headers |
 | `python3 patches/verify-draft-pad.py --selftest` | that the gate above **can fail**. It mutates the inputs — drops the whitelist entry, uses an unpadded config, corrupts a rule, merges the two rule scopes — and requires each mutation to be rejected. A gate that cannot fail proves nothing |
+| `python3 /kit-md5.py --check-container --site <site>` | the pad overlay **landed in the container**: the installed package is byte-for-byte the recipe's own, and every patched stock file is byte-for-byte what the kit's edit produces. The kit's own `verify` above proves its edits SEMANTICALLY; this proves the BYTES, which is the half a half-applied overlay gets wrong |
+| `python3 /kit-md5.py --selftest` | that the container check **can fail**. It builds a synthetic tree from the kit's own anchors, applies the kit to it, and requires the check to accept the tree it produced and to reject a tampered file, a tampered overlay and a missing overlay |
 
 ## 2. The capture gate: what the engine actually resolved
 
@@ -328,6 +339,33 @@ second endpoint has to be **measured**, not merely named: a manifest that
 names an endpoint the bench never measured has no rows for it, and the rule
 treats that as a FAIL, never a skip.
 
+## 4b. The correctness gates (in a window, on the head)
+
+These two are not measurement gates: they ask the engine whether it is
+**correct**, not how fast it is. Both run against the live lane on the
+head, in a boot window, and both are **load-bearing** — a FAIL is a reason
+not to ship the lane, and neither of them can be skipped silently.
+
+| gate | what it proves |
+|---|---|
+| `python3 tools/check-spec-decode-short-prompt.py` | a prompt of **exactly** the engine's own `uniform_decode_query_len` tokens (four, at k=3) produces a sane answer at temperature 0, and the same probe one token longer — a shape the upstream dispatch check does NOT misread — produces the same answer. The upstream defect dispatches such a prefill as a uniform-decode step by shape alone, and the symptom is deterministic garbage from the first generated token |
+| `python3 tools/check-long-prompt-determinism.py` | a prompt that crosses the batched-token budget produces the **same token sequence** cold and with the prefix cache warm. Long prompts take the chunked prefill path, and that is where a serving engine stops being deterministic |
+
+Both build their prompts from the engine's own `/tokenize` endpoint and
+assert the engine's own `usage.prompt_tokens`, because the token count has
+to be exact and a character-level search cannot make it exact: byte-level
+BPE counts are not monotonic in the prefix length. The long-prompt gate
+puts a fresh nonce at the HEAD of its prompt, so the first call is genuinely
+cold even when the same gate is run again on the same lane.
+
+The short-prompt gate resolves the engine's own
+`uniform_decode_query_len` from three sources, in order: a value stated
+with `--query-len`, then the engine's boot log (the line the draft-pad
+gate prints), and finally — if neither is reachable — a value **derived**
+from the recipe's own speculative config, where the window is 1 + k. It
+always says which source it used, and a derived value is labelled as
+such rather than presented as a measurement.
+
 ## 5. The memory guard
 
 ```sh
@@ -340,7 +378,7 @@ bash tools/guard-memory.sh --floor 2432 --container minimax31-flash-tp3
 ```
 
 On a unified-memory box the guard is part of the serving contract, not an
-accessory. It watches free host memory and kills **only this lane's**
+accessory. It watches free host memory and kills **only this recipe's**
 container if it stays under the floor for the debounce count.
 
 * **A single low sample must not kill a serving lane** — hence the debounce.

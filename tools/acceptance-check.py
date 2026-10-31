@@ -373,8 +373,8 @@ CAPTURE_POOL_ESTIMATE_MAX_GIB = {
 }
 
 # ══ THE CAPACITY EXPECTATIONS (no capacity lost) ═════════════════════════
-# The shipped profile's KV pool sits in the 2.0-2.1e5-token class and the
-# engine's own concurrency factor a little above 1.5x at a 131,072-token
+# The shipped profile's KV pool sits in the 2.6e5-token class and the
+# engine's own concurrency factor a little above 2x at a 131,072-token
 # request. Both are rounded EXPECTATIONS, not measurements: the criterion is
 # that the pool did not fall below the floor and that the concurrency did
 # not fall below the factor. Override them for a different profile.
