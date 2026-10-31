@@ -20,6 +20,13 @@
 # Exit: 0 when the boot is a genuine capture boot, 1 otherwise. Fail-closed.
 set -uo pipefail
 
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  echo "usage: bash capture-base-config.sh"
+  echo "       Prove what the capture boot actually enabled (fail-closed)."
+  echo "       Exit: 0 when the boot is a genuine capture boot, 1 otherwise."
+  exit 0
+fi
+
 CONTAINER=minimax31-flash-tp3
 # KIT is overridable so the gate can be NEGATIVE-TESTED against a recipe that
 # deliberately differs from the running boot, without touching the live kit.
@@ -215,7 +222,7 @@ KV_GIB=$(grep -oE "Available KV cache memory: [0-9.]+ GiB" "$TMP" | tail -1 | gr
 # TIGHTEST rank, so EVERY rank's own KV budget must clear this or the pool
 # cannot reach the floor: that is what makes the check mean something on a
 # worker, where the token count does not exist.
-KV_FLOOR=${KV_FLOOR:-196608}
+KV_FLOOR=${KV_FLOOR:-${CTX:-196608}}
 KV_FLOOR_GIB=${KV_FLOOR_GIB:-7.51}
 if [[ "$KV_TOKENS_MALFORMED" == "yes" ]]; then
   # A MALFORMED GROUPING IS NOT A POOL FIGURE. The engine did not write the
@@ -264,7 +271,7 @@ fi
 #   4. the value the ENGINE resolved ("Desired GPU memory utilization is
 #      (0.80, ... GiB)", printed by EVERY rank's gpu_worker) -- so the
 #      budget really took effect and was not clamped back.
-EXPECTED_GMU_PINNED="${EXPECTED_GMU_PINNED:-0.80}"
+EXPECTED_GMU_PINNED="${EXPECTED_GMU_PINNED:-${GMU:-0.80}}"
 RECIPE_GMU=""
 for recipe_start in "$KIT/launch/start-tp3.sh" "$KIT/start-tp3.sh"; do
   [[ -f "$recipe_start" ]] || continue

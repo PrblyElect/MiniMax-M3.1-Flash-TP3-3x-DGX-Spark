@@ -3,8 +3,8 @@
 # The digest of THIS FILE travels with the boot (KIT_MANIFEST_MD5 in
 # config/cluster.env) so a stale manifest cannot verify itself.
 73951b2da013df3e435c8a5919ce2781  kit-md5.py
-d42a4d3a9ed0d0128e063c838d583875  launch/boot-tp3.sh
-493789f76b29191b8aa957baaf99c1f3  launch/start-tp3.sh
+5011670c76aa33b3e10714a9b17eadd7  launch/boot-tp3.sh
+13adfadd9daaee8144aff68a1792ee7a  launch/start-tp3.sh
 5fc2ce4a4cc18960124c9375a5fcc92a  launch/Dockerfile
 008d94d6f467318f65a2692be9a75523  config/spec-config.json
 2726cc35f88b13a039dd3bcb57a8223d  patches/apply_mm31_tp3pads.py
@@ -14,9 +14,9 @@ a4ee58f08452c8d6c409a2825f5cad52  patches/overlay/vllm_tp3_pad/__init__.py
 adf2f36a180af81ae37222178f808a7a  patches/overlay/vllm_tp3_pad/__main__.py
 0cbfe4c4773946976d229ae31c4edb93  patches/overlay/vllm_tp3_pad/tp3_pad_table.json
 a4ec2f00c99d14acfcff9feba75da4b2  tools/guard-memory.sh
-561a39ad4465914d4e8d7b8cb7234fbe  tools/capture-config.sh
-2e27afe1776921661feaf1b7d2b3e28c  tools/capture-base-config.sh
-f7ff4a23a07eac3ebcff7f29d3b52585  tools/acceptance-check.py
+01d56a942618984cdf15cd05d8a95095  tools/capture-config.sh
+7d8adfb5361112a876499e04e4b67ec2  tools/capture-base-config.sh
+96feab75d48e0cd318437798e7fff474  tools/acceptance-check.py
 3ed37403620550c4dcee427f782026ff  tools/assemble-evidence.py
 a0fa65b981a1a31e70b26f1199aa8c76  tools/bench-decode.py
 709fbf470b5e2934d05558a710ea1c09  tools/check-spec-decode-short-prompt.py

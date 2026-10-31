@@ -163,6 +163,92 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+# ── the profile of record ──────────────────────────────────────────────────
+# `config/cluster.env` is the same file the operator edits and the same file
+# the capture gate reads. It is the right source for the values the profile
+# says it SHARES with this rule.
+
+_PROFILE = Path(__file__).resolve().parent.parent / "config" / "cluster.env"
+
+
+def _profile_value(name: str) -> str | None:
+    """A raw value from the profile of record, or None."""
+    try:
+        with open(_PROFILE, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                key, _, value = line.partition("=")
+                if key.strip() == name:
+                    return value.strip().strip('"').strip("'")
+    except OSError:
+        return None
+    return None
+
+
+def _pinned_int(name: str, default: int, env_name: str | None = None) -> int:
+    """A pinned integer: the environment first, then the profile of record,
+    then the default.
+
+    WHY THE PROFILE IS READ, NOT JUST THE ENVIRONMENT: `config/cluster.env`
+    says the capture cap "is HERE so there is one place to change it" and
+    that it is "the SAME number in the capture gate and in the acceptance
+    rule". While this rule carried its own literal, that sentence was false
+    for this half — the gate read the profile and the rule read a constant,
+    so the two expectations could still drift apart, which is exactly the
+    failure the profile comment says its presence was introduced to stop.
+
+    A value that is present but UNPARSEABLE is a hard error, not a silent
+    fallback: a rule that quietly judges against a different number than
+    the profile pins is worse than one that refuses to run.
+
+    `env_name` names a DIFFERENT environment variable that overrides the
+    profile key — used where the rule has always had its own override name
+    (ACCEPT_SERVED_CONTEXT) but the profile carries the value (CTX).
+    """
+    raw = os.environ.get(env_name or name)
+    if raw is None or not raw.strip():
+        raw = _profile_value(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise SystemExit(
+            f"the profile of record pins {name}={raw!r}, which is not a number — "
+            f"fix {_PROFILE} or unset it"
+        )
+
+
+def _pinned_str(name: str, default: str, env_name: str | None = None) -> str:
+    """A pinned string: the environment first, then the profile of record,
+    then the default. An unparseable value is not possible here, but an EMPTY
+    one is refused the same way an unparseable number is."""
+    raw = os.environ.get(env_name or name)
+    if raw is None or not raw.strip():
+        raw = _profile_value(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip()
+
+
+def _pinned_int_list(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
+    """A pinned list of integers, comma-separated in the profile."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        raw = _profile_value(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return tuple(int(p) for p in raw.split(",") if p.strip())
+    except ValueError:
+        raise SystemExit(
+            f"the profile of record pins {name}={raw!r}, which is not a "
+            f"comma-separated list of numbers — fix {_PROFILE} or unset it"
+        )
+
+
 # ══ THE ACCEPTANCE CRITERIA (this recipe's own thresholds) ═══════════════
 # Every number in this block is the recipe's acceptance criterion -- the
 # floor the shipped serving profile has to clear. They are NOT derived from
@@ -230,7 +316,14 @@ PREFILL_CRIT = (f"the workload split: a long-context prefill of at least "
 # FOR THE REQUEST LENGTH IT WAS ASKED ABOUT, so the denominator has to be
 # part of the criterion -- a figure written for one context compared against
 # a boot that served another compares two different things.
-SERVED_CONTEXT = _env_int("ACCEPT_SERVED_CONTEXT", 196_608)
+#
+# THE VALUE COMES FROM THE PROFILE OF RECORD (CTX in config/cluster.env),
+# NOT FROM A LITERAL HERE: the README tells the operator that the served
+# context is edited in the profile, and the launcher's own resolution reads
+# the environment the profile feeds it. A rule that carried its own copy
+# would judge the operator's edited profile against the number the rule
+# remembered. ACCEPT_SERVED_CONTEXT still overrides it, as before.
+SERVED_CONTEXT = _pinned_int("CTX", 196_608, env_name="ACCEPT_SERVED_CONTEXT")
 # THE CAPACITY FLOOR FOLLOWS THE CONTEXT: the lane must be able to hold ONE
 # full-length request AT THE CONTEXT IT SERVES. (It used to be a flat
 # 150,000 tokens, which was the same idea for a 131,072-token context.)
@@ -336,14 +429,17 @@ REQUIRED_BOXES = ("spark-head.local", "spark-a.local", "spark-b.local")
 # to a multiple of uniform_decode_query_len (4) and dropped if it passes
 # max_decode_tokens = max_num_seqs * query_len = 128), so the cap has to
 # leave the decode descriptor set untouched.
-EXPECTED_CG_MAX = 128
-EXPECTED_CG_LIST = (1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96,
-                    104, 112, 120, 128)
+EXPECTED_CG_MAX = _pinned_int("EXPECTED_CG_MAX", 128)
+EXPECTED_CG_LIST = _pinned_int_list(
+    "EXPECTED_CG_LIST", (1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96,
+                         104, 112, 120, 128))
 UNIFORM_DECODE_SIZES = (4, 8, 16, 32, 64, 96, 128)
 # The graph counts the pinned grid implies: 19 piecewise (the pinned grid),
 # 17 full (the decode coverage, unchanged by the cap), 14 dspark (the
 # speculator's own graphs, untouched).
-EXPECTED_CG_GRAPHS = {"piecewise": 19, "full": 17, "dspark": 14}
+_cg_graphs = _pinned_int_list("EXPECTED_CG_GRAPHS", (19, 17, 14))
+EXPECTED_CG_GRAPHS = {"piecewise": _cg_graphs[0], "full": _cg_graphs[1],
+                      "dspark": _cg_graphs[2]}
 
 # ══ THE CAPTURE-POOL EXPECTATIONS (per rank) ═════════════════════════════
 # The shipped profile's capture pool is under 1 GiB per rank, and the
@@ -406,19 +502,29 @@ CROSSCHECK_DRIFT_MAX_PCT = 1.0
 # Lowering the fence to make a boot survive would be the wrong repair; the
 # budget was the thing that was wrong. Why each floor carries the value it
 # does: docs/FIXLOG.md.
+#
+# THE FLOORS COME FROM THE PROFILE OF RECORD (GUARD_MIN_HEAD_MB,
+# GUARD_MIN_R1_MB, GUARD_MIN_R2_MB in config/cluster.env), which publishes
+# them and marks them EDIT-able. A rule that carried its own copy would
+# judge the operator's edited floor against the number the rule remembered.
+_GUARD_FLOOR_KEYS = ("GUARD_MIN_HEAD_MB", "GUARD_MIN_R1_MB", "GUARD_MIN_R2_MB")
+_GUARD_FLOOR_DEFAULTS = (4096, 3584, 2432)
+_GUARD_FLOOR_LABELS = ("spark-head.local", "spark-a.local", "spark-b.local")
 GUARD_FLOORS = {
-    "spark-head.local": 4096,
-    "spark-a.local": 3584,
-    "spark-b.local": 2432,
+    label: _pinned_int(key, default)
+    for label, key, default in zip(_GUARD_FLOOR_LABELS,
+                                   _GUARD_FLOOR_KEYS,
+                                   _GUARD_FLOOR_DEFAULTS)
 }
 
 # ══ THE PRICE ════════════════════════════════════════════════════════════
-# The last rank's pinned guard floor is 2,432 MB; the profile requires at
-# least 1,000 MB of margin above it, because the price of the capture-grid
-# cap is paid in exactly that margin. The margin has to be there, so the
-# criterion below says so out loud.
-BOX3_MIN_AVAILABLE_MB = 3_432
+# The last rank's pinned guard floor (GUARD_MIN_R2_MB in the profile) plus
+# the margin the profile requires above it: the price of the capture-grid
+# cap is paid in exactly that margin, so the criterion below says so out
+# loud. The margin is the profile's own, not a second hardcoded floor.
 BOX3 = "spark-b.local"
+GUARD_MARGIN_MB = _pinned_int("GUARD_MARGIN_MB", 1000)
+BOX3_MIN_AVAILABLE_MB = GUARD_FLOORS[BOX3] + GUARD_MARGIN_MB
 
 # The head box: the only rank that prints the engine's resolved config and
 # the per-mode capture bars.
@@ -429,7 +535,11 @@ HEAD_BOX = "spark-head.local"
 #    config. A rank that booted with a different budget would have a
 #    different KV pool size inside the TP ring -- a rank asymmetry that
 #    looks like the change itself.
-EXPECTED_GMU = "0.80"
+#    The value comes from the profile of record (GMU in config/cluster.env),
+#    which is the file the operator edits: a rule that carried its own
+#    literal would judge the operator's edited budget against the number
+#    the rule remembered.
+EXPECTED_GMU = _pinned_str("GMU", "0.80")
 # 2. THE MEASUREMENT PATH: the baseline path. The TTFT criterion is judged
 #    on rows measured over this path, and the rule FAILS if no such row
 #    exists (a missing measurement is a FAIL). AND the DRIVER'S OWN RECORD
@@ -1333,6 +1443,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main() -> int:
     global BASELINE_PATH, BASELINE_URL, BASELINE_RELAY_PATH, BASELINE_RELAY_URL
     global REQUIRED_BOXES, GUARD_FLOORS, HEAD_BOX, BOX3
+    global BOX3_MIN_AVAILABLE_MB
     global CAPTURE_POOL_ACTUAL_MAX_GIB, CAPTURE_POOL_ESTIMATE_MAX_GIB
 
     args = _parse_args(sys.argv[1:])
@@ -1360,6 +1471,8 @@ def main() -> int:
         CAPTURE_POOL_ESTIMATE_MAX_GIB = dict(zip(labels, estimates))
         HEAD_BOX = labels[0]
         BOX3 = labels[2]
+        # The price follows the remapped rank-2 box's floor.
+        BOX3_MIN_AVAILABLE_MB = GUARD_FLOORS[BOX3] + GUARD_MARGIN_MB
 
     # ==================================================================
     # 1. the bench: the speed criteria

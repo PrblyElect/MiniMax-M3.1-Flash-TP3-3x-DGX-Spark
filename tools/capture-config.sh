@@ -73,7 +73,12 @@ BASE_GATE="${BASE_GATE:-$HERE/capture-base-config.sh}"
 # checked, not assumed: a boot that served a different context would print
 # a different denominator, and comparing that figure against a threshold
 # written for another context would compare two different things.
-EXPECTED_CTX=${EXPECTED_CTX:-196608}
+#
+# THE PROFILE OF RECORD WINS OVER THE LITERAL HERE, so "one place to change
+# it" is true for the capture gate too: the operator edits CTX in
+# config/cluster.env, the boot serves that, and this gate judges that. An
+# explicit EXPECTED_CTX still overrides both.
+EXPECTED_CTX=${EXPECTED_CTX:-${CTX:-196608}}
 # THE CAPACITY FLOOR IS THE SERVED CONTEXT, and it is ONE assignment: the
 # lane must be able to hold ONE full-length request AT the context it
 # serves. (It used to be a flat 150,000 tokens -- the same idea for the
@@ -102,7 +107,7 @@ CONCURRENCY_MIN=${CONCURRENCY_MIN:-1.00}
 # The memory budget this profile pins. It is PINNED, never derived from the
 # box: a stale kit could otherwise agree with itself and PASS. GMU is NOT
 # raised to buy the pool back.
-EXPECTED_GMU_PINNED="${EXPECTED_GMU_PINNED:-0.80}"
+EXPECTED_GMU_PINNED="${EXPECTED_GMU_PINNED:-${GMU:-0.80}}"
 # The spec config this profile pins.
 SPEC_METHOD=${SPEC_METHOD:-dspark}
 SPEC_K=${SPEC_K:-3}

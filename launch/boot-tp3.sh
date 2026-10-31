@@ -15,6 +15,13 @@
 # says; leave ROLE unset and the hostname decides. See the resolution below.
 set -uo pipefail
 
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  echo "usage: bash boot-tp3.sh            (on the box)"
+  echo "       Launch the minimax31-flash TP=3 ring on this box."
+  echo "       Env overrides: ROLE NODE_RANK NODE_IP HEAD_IP TP CTX GMU PORT"
+  exit 0
+fi
+
 HERE="$(cd "$(dirname "$0")" && pwd)"          # launch/
 ROOT="$(dirname "$HERE")"                      # the recipe root (the kit)
 HOST=$(hostname -s)

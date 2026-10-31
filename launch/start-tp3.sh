@@ -23,6 +23,14 @@
 # ../docs/FIXLOG.md; the landmines are in ../README.md.
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  echo "usage: bash start-tp3.sh"
+  echo "       Boot one box of the minimax31-flash TP=3 ring."
+  echo "       Env overrides: every knob; the shipped profile is ../config/cluster.env"
+  echo "       PRINT_CMD=1 prints the exact 'docker run' command and starts nothing."
+  exit 0
+fi
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$HERE")"
 
