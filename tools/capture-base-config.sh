@@ -17,15 +17,38 @@
 # from the LAST boot marker.
 #
 # Usage: bash capture-base-config.sh
+#        bash capture-base-config.sh --selftest
 # Exit: 0 when the boot is a genuine capture boot, 1 otherwise. Fail-closed.
+#        --selftest exits 0 when every check of the selftest passes, 1 otherwise.
 set -uo pipefail
 
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  echo "usage: bash capture-base-config.sh"
-  echo "       Prove what the capture boot actually enabled (fail-closed)."
-  echo "       Exit: 0 when the boot is a genuine capture boot, 1 otherwise."
-  exit 0
-fi
+SELFTEST=0
+# SELFTEST_LOG is the OFFLINE single-case mode: the engine log comes from that
+# file instead of the container, the fleet is never touched, and the notes and
+# the exit code KEEP their meaning. It is what --selftest drives, and it is
+# not a production path.
+SELFTEST_LOG="${SELFTEST_LOG:-}"
+
+case "${1:-}" in
+  --help|-h)
+    echo "usage: bash capture-base-config.sh"
+    echo "       Prove what the capture boot actually enabled (fail-closed)."
+    echo "       Exit: 0 when the boot is a genuine capture boot, 1 otherwise."
+    echo "       bash capture-base-config.sh --selftest"
+    echo "         Run this gate's OWN logic offline over synthetic engine logs:"
+    echo "         no container, no lane, no network. Prints PASS/FAIL per check"
+    echo "         and exits non-zero if any check fails."
+    exit 0 ;;
+  --selftest)
+    SELFTEST=1 ;;
+  "")
+    ;;
+  *)
+    echo "capture-base-config: ignoring an unknown argument: $1" >&2 ;;
+esac
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF="$HERE/$(basename "${BASH_SOURCE[0]}")"
 
 CONTAINER=minimax31-flash-tp3
 # KIT is overridable so the gate can be NEGATIVE-TESTED against a recipe that
@@ -36,12 +59,123 @@ KIT=${KIT:-~/MiniMax-M3.1-Flash-TP3-3x-DGX-Spark}
 case "$KIT" in "~/"*) KIT="$HOME/${KIT#\~/}" ;; esac
 LOG="$KIT/logs-boot-$(hostname -s).out"
 
+# --- the SELFTEST: this gate's own logic, offline --------------------------
+#
+# A gate that cannot fail proves nothing. This selftest drives the gate's OWN
+# assertions -- the same code the live run executes -- over SYNTHETIC engine
+# logs. There is no container, no lane and no network, and every figure in
+# the synthetic logs is synthetic: the log carries no name, no address and no
+# date.
+#
+# IT IS THE SAME CODE IN BOTH PATHS: the selftest runs THIS script with
+# SELFTEST_LOG set, and the script runs its own production assertions over
+# that log. There is no second implementation to drift.
+#
+# WHAT IT REQUIRES:
+#   * a healthy synthetic capture boot PASSES and publishes its figures;
+#   * a malformed thousands grouping is REFUSED, NAMED, and NOT laundered
+#     into a clean integer;
+#   * a pool below the floor is REFUSED;
+#   * a boot that still logs 'Enforce eager set' is REFUSED;
+#   * an encoder that IS captured is REFUSED.
+if [[ "$SELFTEST" -eq 1 ]]; then
+  ST_FAIL=0
+  st_ok()    { echo "[PASS] $1"; }
+  st_bad()   { echo "[FAIL] $1${2:+ -- $2}"; ST_FAIL=1; }
+  st_has()   { if [[ "$2" == *"$3"* ]]; then st_ok "$1"; else st_bad "$1" "the output does not contain: $3"; fi; }
+  st_lacks() { if [[ "$2" != *"$3"* ]]; then st_ok "$1"; else st_bad "$1" "the output DOES contain: $3"; fi; }
+  st_rc()    { if [[ "$2" == "$3" ]]; then st_ok "$1"; else st_bad "$1" "rc=$2, expected rc=$3"; fi; }
+
+  ST_TMPD=$(mktemp -d)
+  trap 'rm -rf "$ST_TMPD"' EXIT
+
+  # st_log <pool> <eager-line> <encoder-captured>
+  st_log() {
+    cat <<STLOG
+(EngineCore pid=1) INFO [core.py:133] Initializing a V1 LLM engine (v0.1) with config: model='/model', enforce_eager=False, cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE, enable_jit_warmup=True, cudagraph_mm_encoder': $3, encoder_cudagraph_token_budgets': [], compile_mm_encoder': False, max_cudagraph_capture_size': 128, cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128]
+$2(Worker_TP0 pid=2) INFO [gpu_worker.py:767] Available KV cache memory: 8.10 GiB
+(Worker_TP0 pid=2) INFO [gpu_worker.py:123] Free memory on device (0.95 GiB for CUDAGraph memory, 8.10 GiB for KV cache)
+(EngineCore pid=1) INFO [core.py:133] Capturing CUDA graphs (PIECEWISE): 19/19 [00:00<00:00, 19.00it/s]
+(EngineCore pid=1) INFO [kv_cache_utils.py:1104] GPU KV cache size: $1 tokens, Maximum concurrency for 196608 tokens per request: 1.05x
+(EngineCore pid=1) INFO [core.py:1234] Desired GPU memory utilization is (0.80, 90.00 GiB)
+(EngineCore pid=1) INFO [core.py:999] CUDA graph pool memory: 0.95 GiB (actual), 1.90 GiB (estimated)
+(APIServer pid=1) INFO [api_utils.py:357] Application startup complete.
+STLOG
+  }
+
+  # st_run <logfile> -- runs THIS script over that log, offline.
+  st_run() {
+    st_out=$(SELFTEST_LOG="$1" SELFTEST=0 \
+      EXPECTED_GMU_PINNED=0.80 KV_FLOOR=196608 KV_FLOOR_GIB=7.51 \
+      bash "$SELF" 2>&1)
+    st_rc=$?
+  }
+
+  echo "=== capture-base-config selftest: this gate's own logic, offline ==="
+
+  # --- case 1: the healthy synthetic boot must PASS ------------------------
+  st_log "200,000" "" "False" > "$ST_TMPD/healthy.log"
+  st_run "$ST_TMPD/healthy.log"
+  st_rc "a healthy synthetic capture boot PASSES" "$st_rc" "0"
+  st_lacks "the healthy synthetic boot raises no FAIL" "$st_out" "[FAIL]"
+  st_has "the healthy synthetic boot publishes the KV pool" "$st_out" \
+    "KV pool 200000 tokens (floor 196608)"
+  st_has "the healthy synthetic boot publishes the capture ceiling" "$st_out" \
+    "max_cudagraph_capture_size = 128"
+  st_has "the healthy synthetic boot proves the budget" "$st_out" \
+    "GMU=0.80"
+
+  # --- case 2: a malformed thousands grouping must be REFUSED --------------
+  st_log "20,0,000" "" "False" > "$ST_TMPD/malformed.log"
+  st_run "$ST_TMPD/malformed.log"
+  st_rc "a malformed thousands grouping is REFUSED" "$st_rc" "1"
+  st_has "the malformed figure is NAMED" "$st_out" "MALFORMED"
+  st_lacks "the malformed figure is not laundered into a clean integer" \
+    "$st_out" "KV pool 200000 tokens"
+
+  # --- case 3: a pool below the floor must be REFUSED ----------------------
+  st_log "100,000" "" "False" > "$ST_TMPD/below.log"
+  st_run "$ST_TMPD/below.log"
+  st_rc "a pool below the floor is REFUSED" "$st_rc" "1"
+  st_has "the below-floor pool is named" "$st_out" "BELOW the 196608 floor"
+
+  # --- case 4: a boot that still logs eager must be REFUSED ----------------
+  st_log "200,000" "(EngineCore pid=1) INFO [core.py:133] Enforce eager set: True
+" "False" > "$ST_TMPD/eager.log"
+  st_run "$ST_TMPD/eager.log"
+  st_rc "a boot with eager still on is REFUSED" "$st_rc" "1"
+  st_has "the still-eager boot is named" "$st_out" "is STILL LOGGED"
+
+  # --- case 5: an encoder that IS captured must be REFUSED ------------------
+  st_log "200,000" "" "True" > "$ST_TMPD/encoder.log"
+  st_run "$ST_TMPD/encoder.log"
+  st_rc "an encoder that IS captured is REFUSED" "$st_rc" "1"
+  st_has "the captured encoder is named" "$st_out" "the encoder may be captured"
+
+  echo
+  if [[ $ST_FAIL -ne 0 ]]; then
+    echo "capture-base-config: SELFTEST FAILED -- the gate's own logic did not behave as it must (rc=1)"
+    exit 1
+  fi
+  echo "capture-base-config: SELFTEST PASS -- the gate's own logic accepts a healthy boot and refuses a malformed one (rc=0)"
+  exit 0
+fi
+
 TMP=$(mktemp)
 trap 'rm -f "$TMP"' EXIT
 
 # --- 1. scope the log to THIS boot ----------------------------------------
 SRC=""
-if docker inspect "$CONTAINER" >/dev/null 2>&1; then
+if [[ -n "$SELFTEST_LOG" ]]; then
+  # OFFLINE: the log comes from the file the selftest wrote. No container, no
+  # lane, no network -- and the assertions below are the SAME ones.
+  if [[ ! -f "$SELFTEST_LOG" ]]; then
+    echo "capture-base-config: SELFTEST_LOG file not found: $SELFTEST_LOG" >&2
+    exit 1
+  fi
+  cat "$SELFTEST_LOG" > "$TMP"
+  SRC="SELFTEST_LOG=$SELFTEST_LOG (a synthetic log, no fleet access)"
+elif docker inspect "$CONTAINER" >/dev/null 2>&1; then
   docker logs "$CONTAINER" > "$TMP" 2>&1
   SRC="docker logs $CONTAINER (this container = this boot)"
 elif [[ -f "$LOG" ]]; then
@@ -273,18 +407,29 @@ fi
 #      budget really took effect and was not clamped back.
 EXPECTED_GMU_PINNED="${EXPECTED_GMU_PINNED:-${GMU:-0.80}}"
 RECIPE_GMU=""
-for recipe_start in "$KIT/launch/start-tp3.sh" "$KIT/start-tp3.sh"; do
-  [[ -f "$recipe_start" ]] || continue
-  RECIPE_GMU=$(grep -oE 'GMU:-[0-9.]+' "$recipe_start" 2>/dev/null | head -1 | sed 's/^GMU:-//')
-  [[ -n "$RECIPE_GMU" ]] && break
-done
-CONTAINER_GMU=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" 2>/dev/null | grep -E '^GMU=' | head -1 | cut -d= -f2)
+CONTAINER_GMU=""
+if [[ -z "$SELFTEST_LOG" ]]; then
+  # The recipe's own default and the container's env are facts about a BOX.
+  # There is no box in the offline selftest, so they are not read there.
+  for recipe_start in "$KIT/launch/start-tp3.sh" "$KIT/start-tp3.sh"; do
+    [[ -f "$recipe_start" ]] || continue
+    RECIPE_GMU=$(grep -oE 'GMU:-[0-9.]+' "$recipe_start" 2>/dev/null | head -1 | sed 's/^GMU:-//')
+    [[ -n "$RECIPE_GMU" ]] && break
+  done
+  CONTAINER_GMU=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" 2>/dev/null | grep -E '^GMU=' | head -1 | cut -d= -f2)
+fi
 RESOLVED_GMU=$(grep -oE 'Desired GPU memory utilization is \([0-9.]+,' "$TMP" | tail -1 | grep -oE '[0-9.]+')
 echo "--- memory budget: pinned='${EXPECTED_GMU_PINNED}' recipe='${RECIPE_GMU:-unknown}' container='${CONTAINER_GMU:-unset}' engine='${RESOLVED_GMU:-unknown}' ---"
 if [[ -z "$RESOLVED_GMU" ]]; then
   note_fail "the engine never reported its memory budget -- cannot prove the budget took effect"
 elif [[ "$RESOLVED_GMU" != "$EXPECTED_GMU_PINNED" ]]; then
   note_fail "the engine resolved GMU=$RESOLVED_GMU but this profile pins GMU=$EXPECTED_GMU_PINNED"
+elif [[ -n "$SELFTEST_LOG" ]]; then
+  # OFFLINE: the recipe's own default and the container's env are facts about
+  # a BOX, and there is no box here -- so the ENGINE's own resolved budget is
+  # the only fact this run can judge. The two cross-checks below it are the
+  # live path's, and the live path is where they belong.
+  note_pass "the memory budget took effect: GMU=$RESOLVED_GMU (pinned value)"
 elif [[ "$RECIPE_GMU" != "$EXPECTED_GMU_PINNED" ]]; then
   note_fail "this box's recipe says GMU=$RECIPE_GMU but this profile pins GMU=$EXPECTED_GMU_PINNED (stale kit?)"
 elif [[ -z "$CONTAINER_GMU" ]]; then

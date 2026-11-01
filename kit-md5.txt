@@ -14,8 +14,8 @@ a4ee58f08452c8d6c409a2825f5cad52  patches/overlay/vllm_tp3_pad/__init__.py
 adf2f36a180af81ae37222178f808a7a  patches/overlay/vllm_tp3_pad/__main__.py
 0cbfe4c4773946976d229ae31c4edb93  patches/overlay/vllm_tp3_pad/tp3_pad_table.json
 a882df7b575a92435630ff8f201300ee  tools/guard-memory.sh
-ea57953cd67dd7bb1452cbfe379bd936  tools/capture-config.sh
-7d8adfb5361112a876499e04e4b67ec2  tools/capture-base-config.sh
+efc85cd811637d39078504b2c27f4503  tools/capture-config.sh
+1ebecfcf50438ca9f15de5ef79855ce3  tools/capture-base-config.sh
 e62cdb98b6ec9629308ffba1b45b66ee  tools/acceptance-check.py
 3ed37403620550c4dcee427f782026ff  tools/assemble-evidence.py
 473f50980e1a593e74c196e285244c4d  tools/bench-decode.py

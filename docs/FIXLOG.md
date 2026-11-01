@@ -87,6 +87,11 @@ actual free memory sits in the upper part of the band, and a table that states
 only "~3.4 GB" hides which end it means — that is how a table starts
 contradicting itself.
 
+**WHERE THE TWO NUMBERS LIVE.** The floor and the margin are the **profile of
+record's** — `GUARD_MIN_R2_MB` and `GUARD_MARGIN_MB` in `config/cluster.env`.
+The rule reads both from there and carries no second copy, so a floor or a
+margin is edited in the profile and nowhere else.
+
 ⇒ **The tightest box decides the budget, and one step up is a
 service-availability decision, not a configuration change.** Raising the budget
 means taking memory from the services that share the box, and that is the
@@ -151,3 +156,4 @@ paper.
 | 37 | an exported serve knob was silently discarded | the profile assigned the four serve knobs as plain values, so sourcing it overwrote the environment, while the same profile used the overridable form for the fabric | the four knobs use the same overridable form as the fabric, so an exported value survives the profile |
 | 38 | the upstream long-context citation read as if the defect applied here | the citation gave the class but not the scope, and the scope is what decides whether it applies | the citation now names the upstream model, topology, attention backend and the request-length regime, and the one axis this recipe does share is stated |
 | 39 | three figures in the acceptance rule and the ladder disagreed with the shipped profile | the pool was re-based from the 0.78 budget to 0.80 and the older numbers were left in the comments and in one rung | the figures are reconciled: the rung that was measured at the older pool says so, and the comments carry the shipped pool |
+| 40 | the capture gates could only be exercised against a live lane, and the documents did not say which floors the rule held for itself | the two capture gates are fail-closed and are the first thing a reader runs, but a reader with no lane — and a reviewer checking the published artifact — had no way to ask "does this gate actually refuse a bad boot?" without one; and the acceptance rule's floors were published as a list of numbers, which read as the rule's own constants rather than as the profile's | both capture gates carry a `--selftest` entry point: it runs the gate's OWN logic over synthetic engine logs (no container, no lane, no network), prints a PASS/FAIL line per check, and exits non-zero if any check fails. It requires a healthy synthetic boot to PASS and requires the malformed thousands grouping, the below-floor pool, the interrupted capture bar, the still-eager boot and the captured encoder to be REFUSED and NAMED — so the gate is shown to be able to fail, which is the only evidence that a PASS means anything. The gates' assertions are unchanged — the only production-path change is that an unrecognised argument now says so on stderr instead of being dropped in silence — and the self-test drives the shipped script rather than a copy of it. The documents now also say, per floor, whether it is the profile of record's (`CTX`, `EXPECTED_CG_*`, `GUARD_MIN_*_MB`, `GUARD_MARGIN_MB`, `GMU`) or the rule's own criterion — one place to change each |

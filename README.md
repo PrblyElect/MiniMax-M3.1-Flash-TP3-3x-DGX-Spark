@@ -48,6 +48,14 @@ deliberately: they are the recipe's spec claims, not a benchmark report.
   reads the engine's *resolved* configuration and gates it, an acceptance
   rule that fails closed, a bench harness with the anti-contamination
   discipline built in, a capture-grid resolver, and a memory guard.
+* **One place to change a floor.** The acceptance rule's expectations come
+  from **the profile of record** — `config/cluster.env` — for everything the
+  profile publishes: the served context, the capture-grid pins, the guard
+  floors, the margin above them, and the memory budget. The rule reads them
+  from there — the profile's value wins — and keeps a literal only as a
+  fallback for a key the profile does not publish, so a floor is edited in
+  the profile and nowhere else. The remaining criteria are the rule's own,
+  and `docs/VALIDATION.md` says which is which.
 
 ## The numbers (measured, labeled, rounded)
 
@@ -110,8 +118,8 @@ cd "$RECIPE_DIR"
 export REMOTE_DIR='~/MiniMax-M3.1-Flash-TP3-3x-DGX-Spark'
 
 # 1. EDIT config/cluster.env for your site: the head's address, the
-#    checkpoint path, the guard floors, the image digest, the served context,
-#    the FABRIC and the serve knobs.
+#    checkpoint path, the guard floors and the margin above them, the image
+#    digest, the served context, the FABRIC and the serve knobs.
 #    THE FABRIC: NCCL_IB_HCA is the pair of InfiniBand/RoCE devices the
 #    collective rides, and the device names belong to your MESH, not to this
 #    recipe -- `ibdev2netdev` lists them (the left column is the device, the
@@ -565,8 +573,38 @@ docs/VALIDATION.md         how to validate a boot, and what each gate proves
   draft head — <https://huggingface.co/MiniMaxAI/MiniMax-M3.1-Flash>
 * The vLLM team for the engine, the TP executor and the sparse-attention
   backends this recipe runs on, and for the public upstream recipe for this
-  model, whose mandatory serve flags this profile follows —
+  model, whose mandatory serve flags this profile follows (with the KV
+  cache dtype deliberately overridden — see the section below) —
   <https://recipes.vllm.ai/MiniMaxAI/MiniMax-M3.1-Flash> and
   <https://github.com/vllm-project/vllm>
 * NVIDIA for the DGX Spark platform and the GB10 memory model this recipe's
   memory arithmetic depends on — <https://developer.nvidia.com>
+
+### The public recipes for this model, and for the platform
+
+Two different "upstreams" matter to a reader here, and they are easy to
+conflate:
+
+* **The model's own upstream recipe** — <https://recipes.vllm.ai/MiniMaxAI/MiniMax-M3.1-Flash>
+  — is the source of the mandatory serve flags this profile follows
+  (`--block-size 128`, the `dspark` speculative config, the `minimax_m3`
+  tool and reasoning parsers). Its `--kv-cache-dtype nvfp4` is the one
+  flag this profile deliberately **overrides**, with `fp8`
+  (`config/cluster.env`); the draft-pad gate requires `fp8`, so changing
+  it is a re-audit rather than a tweak. It is a recipe for a different
+  hardware class: its default configuration is a tensor-parallel B300
+  box, not a 3× Spark lane.
+* **The public Spark serving project** — <https://github.com/eugr/spark-vllm-docker>
+  (MIT) — carries a YAML recipe system for the Spark platform
+  (`recipes/<model>.yaml`, `recipes/{3,4,8}x-spark-cluster/`, `run-recipe.py`,
+  `autodiscover.sh`, `cluster_topology.py`). **It ships no MiniMax-M3.1
+  recipe.** Its MiniMax entries are M2, M2.5 and M2.7 — the first three as
+  third-party 4-bit AWQ quantizations, and M2.5 again in the 4× cluster
+  family — and its 3× cluster family carries no MiniMax model at all.
+
+So within that Spark project this model has **no counterpart recipe**: a
+reader looking for "the MiniMax-M3.1 Spark recipe" will not find one there,
+and the recipe a reader compares against is the model's own upstream recipe
+above. This recipe is the 3× Spark, TP=3, DSpark-k=3 composition of it — the
+serve flags it follows, on three boxes, with the gates and the evidence
+contract below.

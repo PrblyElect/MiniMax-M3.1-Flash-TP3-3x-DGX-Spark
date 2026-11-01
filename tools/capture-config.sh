@@ -49,8 +49,10 @@
 # fact, and a non-zero exit. Nothing is "printed but not asserted".
 #
 # Usage: bash capture-config.sh [--head HOST] [--r1 HOST] [--r2 HOST] [--out DIR]
+#        bash capture-config.sh --selftest
 # Exit: 0 when the boot is a genuine speculative-decode boot, 1 otherwise.
-# Fail-closed.
+#        Fail-closed. --selftest exits 0 when every check of the selftest
+#        passes, 1 otherwise.
 set -uo pipefail
 
 CONTAINER=minimax31-flash-tp3
@@ -61,6 +63,7 @@ KIT=${KIT:-~/MiniMax-M3.1-Flash-TP3-3x-DGX-Spark}
 # shell -- expand it here, so the default means the operator's home.
 case "$KIT" in "~/"*) KIT="$HOME/${KIT#\~/}" ;; esac
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF="$HERE/$(basename "${BASH_SOURCE[0]}")"
 HOST=$(hostname -s)
 LOG="$KIT/logs-boot-$(hostname -s).out"
 # The base capture gate (the inherited checks). It lives next to this
@@ -124,8 +127,17 @@ LANE_HEAD=""
 LANE_R1=""
 LANE_R2=""
 OUT_DIR=""
+SELFTEST=0
+# SELFTEST_LOG is the OFFLINE single-case mode: the engine log comes from that
+# file instead of the container, the fleet is never touched, and the notes and
+# the exit code KEEP their meaning. It is what --selftest drives, and it is
+# not a production path.
+SELFTEST_LOG="${SELFTEST_LOG:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --selftest)
+      SELFTEST=1
+      shift ;;
     --head|--r1|--r2|--out)
       [[ $# -ge 2 ]] || { echo "capture-config: $1 needs a value" >&2; exit 2; }
       case "$1" in
@@ -141,6 +153,10 @@ while [[ $# -gt 0 ]]; do
     --out=*)  OUT_DIR="${1#--out=}"; shift ;;
     -h|--help)
       echo "usage: capture-config.sh [--head HOST] [--r1 HOST] [--r2 HOST] [--out DIR]"
+      echo "       bash capture-config.sh --selftest"
+      echo "         Run this gate's OWN logic offline over synthetic engine logs:"
+      echo "         no container, no lane, no network. Prints PASS/FAIL per check"
+      echo "         and exits non-zero if any check fails."
       exit 0 ;;
     *)
       echo "capture-config: ignoring an unknown argument: $1" >&2
@@ -170,6 +186,123 @@ if [[ -n "$EXTRACT_ONLY" ]]; then
   # code carries no meaning (the thresholds live in the rule).
   note_fail() { :; }
   note_pass() { :; }
+fi
+# THE OFFLINE SELFTEST MODE: the log comes from a file, the fleet is never
+# touched, and the notes and the exit code KEEP their meaning -- this mode
+# judges, it does not merely extract.
+if [[ -n "$SELFTEST_LOG" ]]; then
+  HOST="selftest"
+fi
+
+# --- the SELFTEST: this gate's own logic, offline --------------------------
+#
+# A gate that cannot fail proves nothing. This selftest drives the gate's OWN
+# assertions -- the same code the live run executes -- over SYNTHETIC engine
+# logs. There is no container, no lane and no network, and every figure in
+# the synthetic logs is synthetic: the log carries no name, no address and no
+# date.
+#
+# IT IS THE SAME CODE IN BOTH PATHS: the selftest runs THIS script with
+# SELFTEST_LOG set, and the script runs its own production assertions over
+# that log. There is no second implementation to drift.
+#
+# WHAT IT REQUIRES:
+#   * a healthy synthetic boot PASSES and publishes its machine-readable facts;
+#   * a malformed thousands grouping is REFUSED, NAMED, and NOT laundered
+#     into a clean integer;
+#   * a pool below the floor is REFUSED;
+#   * an INTERRUPTED capture bar is REFUSED and travels as the raw pair.
+if [[ "$SELFTEST" -eq 1 ]]; then
+  ST_FAIL=0
+  st_ok()    { echo "[PASS] $1"; }
+  st_bad()   { echo "[FAIL] $1${2:+ -- $2}"; ST_FAIL=1; }
+  st_has()   { if [[ "$2" == *"$3"* ]]; then st_ok "$1"; else st_bad "$1" "the output does not contain: $3"; fi; }
+  st_lacks() { if [[ "$2" != *"$3"* ]]; then st_ok "$1"; else st_bad "$1" "the output DOES contain: $3"; fi; }
+  st_lacks_line() { if [[ "$2" != *"
+$3
+"* ]]; then st_ok "$1"; else st_bad "$1" "the output HAS this exact line: $3"; fi; }
+  st_rc()    { if [[ "$2" == "$3" ]]; then st_ok "$1"; else st_bad "$1" "rc=$2, expected rc=$3"; fi; }
+
+  ST_TMPD=$(mktemp -d)
+  trap 'rm -rf "$ST_TMPD"' EXIT
+
+  # st_log <pool> <piecewise-bar>
+  st_log() {
+    cat <<STLOG
+(EngineCore pid=1) INFO [core.py:133] Initializing a V1 LLM engine (v0.1) with config: model='/model', max_seq_len=196608, max_model_len': 196608, enforce_eager=False, max_cudagraph_capture_size': 128, cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128]
+(Worker_TP0 pid=2) INFO [gpu_worker.py:767] Available KV cache memory: 8.10 GiB
+(EngineCore pid=1) INFO [core.py:133] Capturing CUDA graphs (PIECEWISE): $2 [00:00<00:00, 19.00it/s]
+(EngineCore pid=1) INFO [core.py:133] Capturing CUDA graphs (FULL): 17/17 [00:00<00:00, 17.00it/s]
+(EngineCore pid=1) INFO [core.py:133] Capturing dspark CUDA graphs (FULL): 14/14 [00:00<00:00, 14.00it/s]
+(EngineCore pid=1) INFO [kv_cache_utils.py:1104] GPU KV cache size: $1 tokens, Maximum concurrency for 196608 tokens per request: 1.05x
+(EngineCore pid=1) INFO [core.py:1234] Desired GPU memory utilization is (0.80, 90.00 GiB)
+(EngineCore pid=1) INFO [core.py:999] CUDA graph pool memory: 0.95 GiB (actual), 1.90 GiB (estimated)
+(APIServer pid=1) INFO [api_utils.py:357] Application startup complete.
+STLOG
+  }
+
+  # st_run <logfile> -- runs THIS script over that log, offline.
+  st_run() {
+    st_out=$(SELFTEST_LOG="$1" SELFTEST=0 \
+      EXPECTED_CTX=196608 KV_FLOOR=196608 KV_FLOOR_GIB=7.51 \
+      CONCURRENCY_MIN=1.00 CAPTURE_COVERAGE_MIN=128 \
+      EXPECTED_GMU_PINNED=0.80 \
+      EXPECTED_CG_MAX=128 \
+      EXPECTED_CG_LIST="1,2,4,8,16,24,32,40,48,56,64,72,80,88,96,104,112,120,128" \
+      EXPECTED_CG_GRAPHS="19,17,14" \
+      bash "$SELF" 2>&1)
+    st_rc=$?
+  }
+
+  echo "=== capture-config selftest: this gate's own logic, offline ==="
+
+  # --- case 1: the healthy synthetic boot must PASS ------------------------
+  st_log "200,000" "19/19" > "$ST_TMPD/healthy.log"
+  st_run "$ST_TMPD/healthy.log"
+  st_rc "a healthy synthetic speculative-decode boot PASSES" "$st_rc" "0"
+  st_lacks "the healthy synthetic boot raises no FAIL" "$st_out" "[FAIL]"
+  st_has "the healthy synthetic boot publishes the KV pool" "$st_out" \
+    "[GATE] kv_pool_tokens=200000"
+  st_has "the healthy synthetic boot publishes the concurrency" "$st_out" \
+    "[GATE] kv_concurrency=1.05"
+  st_has "the healthy synthetic boot publishes the concurrency denominator" \
+    "$st_out" "[GATE] kv_concurrency_ctx=196608"
+  st_has "the healthy synthetic boot publishes the capture counts" "$st_out" \
+    "[GATE] cg_graph_piecewise=19"
+  st_has "the healthy synthetic boot publishes the resolved budget" "$st_out" \
+    "[GATE] gmu=0.80"
+
+  # --- case 2: a malformed thousands grouping must be REFUSED --------------
+  st_log "20,0,000" "19/19" > "$ST_TMPD/malformed.log"
+  st_run "$ST_TMPD/malformed.log"
+  st_rc "a malformed thousands grouping is REFUSED" "$st_rc" "1"
+  st_has "the malformed figure is NAMED" "$st_out" "MALFORMED"
+  st_lacks "the malformed figure is not laundered into a clean integer" \
+    "$st_out" "[GATE] kv_pool_tokens=200000"
+
+  # --- case 3: a pool below the floor must be REFUSED ----------------------
+  st_log "100,000" "19/19" > "$ST_TMPD/below.log"
+  st_run "$ST_TMPD/below.log"
+  st_rc "a pool below the floor is REFUSED" "$st_rc" "1"
+  st_has "the below-floor pool is named" "$st_out" "BELOW the floor of 196608"
+
+  # --- case 4: an INTERRUPTED capture bar must be REFUSED ------------------
+  st_log "200,000" "19/35" > "$ST_TMPD/interrupted.log"
+  st_run "$ST_TMPD/interrupted.log"
+  st_rc "an interrupted capture bar is REFUSED" "$st_rc" "1"
+  st_has "the interrupted bar is named" "$st_out" "the capture bar is INCOMPLETE"
+  st_has "the interrupted bar travels as the raw pair" "$st_out" \
+    "[GATE] cg_graph_piecewise=19/35"
+  st_lacks_line "the interrupted bar is not published as a count" "$st_out" \
+    "[GATE] cg_graph_piecewise=19"
+
+  echo
+  if [[ $ST_FAIL -ne 0 ]]; then
+    echo "capture-config: SELFTEST FAILED -- the gate's own logic did not behave as it must (rc=1)"
+    exit 1
+  fi
+  echo "capture-config: SELFTEST PASS -- the gate's own logic accepts a healthy boot and refuses a malformed one (rc=0)"
+  exit 0
 fi
 
 TMP=$(mktemp)
@@ -224,6 +357,8 @@ echo "lane boxes: head=${LANE_HEAD:-unknown} r1=${LANE_R1:-unknown} r2=${LANE_R2
 # --- 0. the base capture gate ----------------------------------------------
 if [[ -n "$EXTRACT_ONLY" ]]; then
   echo "=== EXTRACT_ONLY: no fleet access, no verdicts -- facts only ==="
+elif [[ -n "$SELFTEST_LOG" ]]; then
+  echo "=== SELFTEST: offline -- the base capture gate is not run (no container) ==="
 elif KV_FLOOR="$KV_FLOOR" KV_FLOOR_GIB="$KV_FLOOR_GIB" \
    EXPECTED_GMU_PINNED="$EXPECTED_GMU_PINNED" KIT="$KIT" \
    bash "$BASE_GATE"; then
@@ -237,6 +372,9 @@ fi
 # carries a different kit must fail HERE.
 if [[ -n "$EXTRACT_ONLY" ]]; then
   KIT_FACT="skipped"
+elif [[ -n "$SELFTEST_LOG" ]]; then
+  KIT_FACT="skipped"
+  echo "=== SELFTEST: offline -- the kit check is not run (no container) ==="
 else
   echo "--- kit identity on this box ---"
   KIT_OUT=$(cd "$KIT" && python3 kit-md5.py --check "${KIT_MANIFEST_MD5:-}" 2>&1)
@@ -258,6 +396,15 @@ if [[ -n "$EXTRACT_ONLY" ]]; then
   fi
   cat "$EXTRACT_ONLY" > "$TMP"
   SRC="EXTRACT_ONLY=$EXTRACT_ONLY (a log file, no fleet access)"
+elif [[ -n "$SELFTEST_LOG" ]]; then
+  # OFFLINE: the log comes from the file the selftest wrote. No container, no
+  # lane, no network -- and the assertions below are the SAME ones.
+  if [[ ! -f "$SELFTEST_LOG" ]]; then
+    echo "capture-config: SELFTEST_LOG file not found: $SELFTEST_LOG" >&2
+    exit 1
+  fi
+  cat "$SELFTEST_LOG" > "$TMP"
+  SRC="SELFTEST_LOG=$SELFTEST_LOG (a synthetic log, no fleet access)"
 elif docker inspect "$CONTAINER" >/dev/null 2>&1; then
   docker logs "$CONTAINER" > "$TMP" 2>&1
   SRC="docker logs $CONTAINER (this container = this boot)"
@@ -290,13 +437,26 @@ echo "=== role: $ROLE (engine config dump present: $([[ -n "$ENG_CFG" ]] && echo
 #   (c) on the head, the engine's RESOLVED config names the spec config with
 #       THE ENGINE'S OWN SPELLING (num_spec_tokens, not num_speculative_tokens).
 echo "--- the spec config on this rank ---"
-CMD=$(docker inspect -f '{{range .Config.Cmd}}{{println .}}{{end}}' "$CONTAINER" 2>/dev/null || true)
+CMD=""
+if [[ -z "$SELFTEST_LOG" ]]; then
+  CMD=$(docker inspect -f '{{range .Config.Cmd}}{{println .}}{{end}}' "$CONTAINER" 2>/dev/null || true)
+fi
 SPEC_CMD=no
 SPEC_CMD_READS_FILE=no
 SPEC_FILE=no
 SPEC_FILE_METHOD=no
 SPEC_FILE_K=no
-if [[ -z "$CMD" ]]; then
+if [[ -n "$SELFTEST_LOG" ]]; then
+  # OFFLINE: the container's Cmd is a fact about a CONTAINER, and there is no
+  # container here -- so this section is not judged in the selftest. The
+  # sections that read the ENGINE are.
+  SPEC_CMD=skipped
+  SPEC_CMD_READS_FILE=skipped
+  SPEC_FILE=skipped
+  SPEC_FILE_METHOD=skipped
+  SPEC_FILE_K=skipped
+  echo "=== SELFTEST: offline -- the container's Cmd is not read (no container) ==="
+elif [[ -z "$CMD" ]]; then
   note_fail "docker inspect returned no Cmd for $CONTAINER -- the spec config cannot be proven"
 elif echo "$CMD" | grep -q -- "--speculative-config"; then
   SPEC_CMD=yes
@@ -351,7 +511,13 @@ fi
 # docs/FIXLOG.md).
 SPEC_RESOLVED=no
 SPEC_RESOLVED_NUM_SPEC_TOKENS=no
-if [[ "$ROLE" == "head" ]]; then
+if [[ -n "$SELFTEST_LOG" ]]; then
+  # OFFLINE: the spec config is a fact about the CONTAINER (read above), so
+  # the selftest does not judge it here.
+  SPEC_RESOLVED=skipped
+  SPEC_RESOLVED_NUM_SPEC_TOKENS=skipped
+  echo "=== SELFTEST: offline -- the resolved spec config is not judged ==="
+elif [[ "$ROLE" == "head" ]]; then
   if echo "$ENG_CFG" | grep -qE "speculative_config=[A-Za-z]" \
      && ! echo "$ENG_CFG" | grep -qE "speculative_config=None"; then
     SPEC_RESOLVED=yes

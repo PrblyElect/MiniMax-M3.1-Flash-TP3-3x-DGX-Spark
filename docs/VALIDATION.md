@@ -131,6 +131,31 @@ measured the same thing would be wrong in both directions.
 **Quote the engine's own pool**, from its boot log's KV-size line — never an
 estimate of it — and band it: the pool is boot-labile.
 
+### 2b. The capture gates' offline self-tests
+
+Both capture gates carry a **`--selftest` entry point**. It runs the gate's
+OWN logic — the same code the live run executes — over synthetic engine logs:
+no container, no lane and no network. It prints a PASS/FAIL line per check
+and exits non-zero if any check fails.
+
+```sh
+# on any machine -- no box, no lane, no engine:
+bash tools/capture-config.sh --selftest
+bash tools/capture-base-config.sh --selftest
+# expected: a PASS line per check, then
+#   capture-config: SELFTEST PASS -- ... (rc=0)
+#   capture-base-config: SELFTEST PASS -- ... (rc=0)
+```
+
+| gate | what its self-test proves |
+|---|---|
+| `bash tools/capture-config.sh --selftest` | that the capture gate **can fail**. It requires a healthy synthetic boot to PASS and to publish its machine-readable facts, and requires a malformed thousands grouping, a below-floor pool and an interrupted capture bar to be REFUSED — each NAMED, the malformed figure not laundered into a clean integer, and the interrupted bar carried as the raw pair rather than as a count |
+| `bash tools/capture-base-config.sh --selftest` | that the base capture gate **can fail**. It requires a healthy synthetic boot to PASS, and requires a malformed thousands grouping, a below-floor pool, a boot that still logs `Enforce eager set`, and an encoder that IS captured to be REFUSED |
+
+The self-test drives the shipped script rather than a copy of it: it writes a
+synthetic log and runs the gate over it, so the assertions it exercises are
+the gate's own and cannot drift away from them.
+
 ## 3. The acceptance rule
 
 **FIRST, ASSEMBLE THE AGGREGATES.** The rule reads three files that are
@@ -198,19 +223,37 @@ The rule checks the lane's behaviour, not just its configuration:
 * every box's free memory stayed above its floor for the whole window, and
   the margin on the tightest box is itself checked.
 
-The floors are the recipe's own acceptance criteria, and they are
-overridable — but an override is a decision, not a convenience:
+**Where each floor comes from.** The rule reads the **profile of record**
+(`config/cluster.env`) for everything the profile publishes, and holds the
+rest as its own acceptance criteria. A floor the profile publishes is
+changed **in the profile and nowhere else** — the profile's value wins,
+and the rule keeps a literal only as a fallback for a key the profile
+does not publish.
 
-| criterion | floor |
-|---|---|
-| KV pool | one full-length request at the served context (196,608 tokens) |
-| concurrency at the served context | 1.00x |
-| capacity, read like-for-like at 131,072 tokens | 1.40x |
-| draft acceptance, position 0 (merged, and each workload class) | 0.5 |
-| per-token latency | within the profile's band |
-| time to first token | 0.60 s |
-| long-context prefill | 8,192 tokens as a FLOOR: the engine's own measured length must reach it |
-| guard floor, head / rank 1 / rank 2 | 4,096 / 3,584 / 2,432 MB |
+A floor that is the rule's own criterion is a **literal in
+`tools/acceptance-check.py`**. Most of them are not environment-
+overridable at all; the exceptions are named in the rule (for example
+`ACCEPT_CONCURRENCY_NO_LOSS_X`), and an override is a decision, not a
+convenience.
+
+| criterion | floor | where the floor lives |
+|---|---|---|
+| KV pool | one full-length request at the served context (196,608 tokens) | the profile: `CTX` |
+| concurrency at the served context | 1.00x | the rule's own criterion |
+| capacity, read like-for-like at 131,072 tokens | 1.40x | the rule's own criterion (`ACCEPT_CONCURRENCY_NO_LOSS_X`) |
+| draft acceptance, position 0 (merged, and each workload class) | 0.5 | the rule's own criterion |
+| per-token latency | within the rule's own band | the rule's own criterion |
+| time to first token | 0.60 s | the rule's own criterion |
+| long-context prefill | 8,192 tokens as a FLOOR: the engine's own measured length must reach it | the rule's own criterion |
+| capture coverage | the engine's capture ceiling must reach 128, and its list must contain 128 | the rule's own criterion; the profile separately pins the exact grid the gate **and the rule** check (`EXPECTED_CG_MAX`, `EXPECTED_CG_LIST`, `EXPECTED_CG_GRAPHS`) |
+| guard floor, head / rank 1 / rank 2 | 4,096 / 3,584 / 2,432 MB | the profile: `GUARD_MIN_HEAD_MB`, `GUARD_MIN_R1_MB`, `GUARD_MIN_R2_MB` |
+| margin over the floor on the tightest box | 1,000 MB | the profile: `GUARD_MARGIN_MB` |
+| memory budget, asserted on every rank | the profile's budget (0.80) | the profile: `GMU` |
+
+So there is **one place to change each** profile-published floor. A value
+that the profile publishes but that is present and unparseable is a hard
+error — the rule refuses to run rather than silently falling back to its
+own literal.
 
 **The rule is a set of criteria, not a report.** It exits non-zero when a
 criterion fails. A criterion whose input is missing fails; it does not skip.
