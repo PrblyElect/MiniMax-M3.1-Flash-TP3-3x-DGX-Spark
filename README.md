@@ -550,6 +550,8 @@ tools/acceptance-check.py  the acceptance rule (fails closed)
 tools/assemble-evidence.py turn the per-box evidence into the rule's aggregates
 tools/bench-decode.py      the bench harness (nonce-isolated, warmup-aware)
 tools/resolve-capture-grid.py  prove the capture cap against the derivation
+tools/_*.py                 the shipped batteries (rule, producers, capture
+                            gates) — run them after any edit to a gated tool
 tools/check-spec-decode-short-prompt.py  the short-prompt correctness gate
 tools/check-long-prompt-determinism.py  the long-prompt determinism gate
 tools/guard-memory.sh      the unified-memory guard

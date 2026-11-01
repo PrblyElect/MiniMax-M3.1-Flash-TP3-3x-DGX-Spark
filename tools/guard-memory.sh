@@ -16,8 +16,8 @@
 # It never stops, removes or reloads anything else, and it never touches a
 # model suite other than this recipe's own container.
 #
-# DEBOUNCE: a single low sample is not enough. A box's steady state is only
-# ~2 GiB above its threshold, and a service's RSS grows after a restart, so a
+# DEBOUNCE: a single low sample is not enough. A box can sit close to its
+# threshold in steady state, and a service's RSS grows after a restart, so a
 # one-sample trip could kill a HEALTHY serving container. Three consecutive
 # breaches are required.
 #

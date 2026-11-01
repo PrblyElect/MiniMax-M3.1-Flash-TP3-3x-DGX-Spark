@@ -38,10 +38,10 @@ measured in.
 
 | # | Lever | Verdict | Why |
 |---|---|---|---|
-| 16 | the capture grid, capped at 128 | **kept** | the capture estimate and the real pool fall together, and the freed estimate becomes KV capacity at approximately zero price in host memory: the pool grows by about 15,000 tokens (roughly 8% of the pool it had before the cap) with the host budget unmoved, and the decode hot path is untouched |
+| 16 | the capture grid, capped at 128 | **kept** | the capture estimate and the real pool fall together, and the freed estimate becomes KV capacity at approximately zero price in host memory: the pool grows by about 15,000 tokens (roughly 8% of the pool it had before the cap (measured at the then-0.78 budget)) with the host budget unmoved, and the decode hot path is untouched |
 | 17 | the memory budget, one step up | **rejected on the arithmetic** | on a unified-memory box the budget is host memory, and the tightest box does not have the headroom. In a measurement window it would have passed; in the shipped state the guard would fire. The price is written out per box in this file's last section |
 | 18 | the capture-estimate flag (turn the estimate off) | **rejected on the arithmetic** | it frees the whole estimate but the real pool then lands on top of the budget, so it costs real memory the lane does not have |
-| 19 | the dspark verification budget (adaptive verification) | **closed by the engine** | the physics says it should matter — on prose the third draft position is worth about 0.03 tokens per step — but this recipe's attention backends declare uniform-batch cudagraph support and cannot replay variable-length verification, so the engine refuses it at startup. The refusal is the engine's own; the rung was never booted |
+| 19 | the dspark verification budget (adaptive verification) | **closed by the engine** | the physics says it should matter — on prose the third draft position is worth about 0.03 tokens per step under the then-current mixed-acceptance measurement (predating the per-workload split in the shipped numbers) — but this recipe's attention backends declare uniform-batch cudagraph support and cannot replay variable-length verification, so the engine refuses it at startup. The refusal is the engine's own; the rung was never booted |
 | 20 | a lower capture ceiling still | **priced and declined** | worth roughly 3,000 tokens, which does not move the lane off a single full-length request, and it spends the draft path's entire safety margin |
 | 21 | synthetic rejection sampling | **rejected on correctness** | it accepts draft tokens on a calibrated probability instead of verifying them, so the output is no longer sampled from the model being served |
 | 22 | greedy draft sampling, parallel drafting | **not taken / closed** | greedy matches a greedy target and this recipe serves a stochastic one; the draft is not trained for parallel drafting |
@@ -63,7 +63,7 @@ The second rung that mattered was **the pad**: a 428B model whose published
 geometry is four-way cannot be sharded three ways, and the same wall sits
 behind the draft head.
 
-## The shipped state, priced
+## The shipped state, priced (at the 0.78 budget, before the tenant change below)
 
 Every box's shipped free memory against the guard floor, and what one step of
 the budget would cost. This is the table that decides whether a budget change

@@ -25,11 +25,13 @@ knows the second endpoint exists and judges it on its own floor. With no
 --relay-url, the manifest records no second endpoint and the rule reports
 the second-endpoint criteria as not applicable, explicitly.
 
-Usage:
+Usage (the shape the shipped acceptance rule accepts — a full
+prose/high-draft split over the 1/4/8/16 stream ladder):
     python3 bench-decode.py --lane-url http://127.0.0.1:8100 --tokens 800 \\
-        --rounds 2 --streams 1,4,8,16 --workload prose
+        --rounds 2 --streams 1,4,8,16 --workload prose,high-draft
     python3 bench-decode.py --lane-url http://127.0.0.1:8100 \\
-        --relay-url http://127.0.0.1:8001 --tokens 800 --rounds 2
+        --relay-url http://127.0.0.1:8001 --tokens 800 --rounds 2 \\
+        --streams 1,4,8,16 --workload prose,high-draft
 """
 
 from __future__ import annotations

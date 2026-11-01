@@ -87,8 +87,8 @@ EXPECTED_CTX=${EXPECTED_CTX:-${CTX:-196608}}
 # IF THE CONTEXT CHANGES, THE GiB FLOOR BELOW MUST CHANGE WITH IT: the two
 # are the same fact in two units.
 KV_FLOOR=${KV_FLOOR:-$EXPECTED_CTX}
-# The capacity floor is NOT the 250,000 tokens of a plain (non-speculative)
-# boot: speculative decode spends KV on the draft's weights (0.71 GiB/rank),
+# The capacity floor is NOT the 250,000 tokens of the old-default plain
+# (non-speculative) boot: speculative decode spends KV on the draft's weights (0.71 GiB/rank),
 # the draft's own KV group (2.5 KiB/token) and the capture-pool growth.
 # Below the served context, or a concurrency under 1.00x, is a REJECT ON
 # CAPACITY.

@@ -2799,7 +2799,7 @@ def main() -> int:
     # THE PROMPT LENGTH IS `prompt_tokens`, OR IT IS MISSING. There is NO
     # SECOND PLACE TO READ IT FROM. The shipped bench reads the length out
     # of the server's own usage block and writes it as `prompt_tokens`
-    # (bench-decode.py:443-448); it never writes a prefill row with a bare
+    # (bench-decode.py:552-562); it never writes a prefill row with a bare
     # `tokens` and no `prompt_tokens`. So the row's generic `tokens` field
     # is NOT the prompt length, and reading it as one would let a row
     # CHOOSE ITS OWN "PROMPT LENGTH" -- a hostile row that omits

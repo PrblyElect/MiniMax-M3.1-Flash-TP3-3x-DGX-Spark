@@ -13,12 +13,12 @@
 a4ee58f08452c8d6c409a2825f5cad52  patches/overlay/vllm_tp3_pad/__init__.py
 adf2f36a180af81ae37222178f808a7a  patches/overlay/vllm_tp3_pad/__main__.py
 0cbfe4c4773946976d229ae31c4edb93  patches/overlay/vllm_tp3_pad/tp3_pad_table.json
-a4ec2f00c99d14acfcff9feba75da4b2  tools/guard-memory.sh
-01d56a942618984cdf15cd05d8a95095  tools/capture-config.sh
+a882df7b575a92435630ff8f201300ee  tools/guard-memory.sh
+ea57953cd67dd7bb1452cbfe379bd936  tools/capture-config.sh
 7d8adfb5361112a876499e04e4b67ec2  tools/capture-base-config.sh
-96feab75d48e0cd318437798e7fff474  tools/acceptance-check.py
+e62cdb98b6ec9629308ffba1b45b66ee  tools/acceptance-check.py
 3ed37403620550c4dcee427f782026ff  tools/assemble-evidence.py
-a0fa65b981a1a31e70b26f1199aa8c76  tools/bench-decode.py
+473f50980e1a593e74c196e285244c4d  tools/bench-decode.py
 709fbf470b5e2934d05558a710ea1c09  tools/check-spec-decode-short-prompt.py
 6ecd95bc9064f9daafe36144c9a99c90  tools/check-long-prompt-determinism.py
 f35f7d8d10c07504defdb1e1a0d75a45  tools/_bench_producer_battery.py
