@@ -115,13 +115,16 @@ budget was asking for, and the rejection's premise — the only reason 0.80
 was refused — is void.
 
 So the profile steps: **GMU 0.78 → 0.80**, with the capture-grid cap
-unchanged. At 0.80 the pool reads roughly **266,000 tokens**: about **2.0x**
-concurrency at a 131,072-token request, about **1.35x** at the served
-196,608 — a larger pool than the one the context rung was priced against
-(rung 23 measured the 0.78-era pool), read against the same denominators.
-A 262,144-token request now fits
-the pool where at 0.78 it did not; it still buys almost no concurrency, so
-the served context stays 196,608.
+unchanged. A clean-head measurement puts the 0.80 pool at roughly **224,000
+tokens**: about **1.71x** concurrency at a 131,072-token request, about
+**1.14x** at the served 196,608 — a larger pool than the one the context rung
+was priced against (rung 23 measured the 0.78-era pool), read against the
+same denominators. The number is lower than an unprofiled 0.80 would suggest
+because the engine takes its CUDA-graph memory-profiling estimate out of the
+budget before sizing the KV cache: it reports 0.80 as equivalent to 0.7819
+without that profiling, and 0.8181 would be needed to keep the same effective
+KV. A 262,144-token request does **not** fit at ~224K — it is refused at
+request time — so the served context stays 196,608.
 
 The profile is arithmetic-plus-guard, not a new magic number: the boot-time
 capture gate pins 0.80 and verifies the budget on all four surfaces (the
@@ -131,6 +134,29 @@ whole session, and the acceptance rule judges the run from the boot's own
 evidence. A future layout that puts heavy tenants back on the boxes owes
 this file the same honesty: re-price, lower `GMU`, and let the guard be the
 arbiter.
+
+## After the ladder: two later rungs the record should carry
+
+Two experiments run after this ladder change what a reader should expect from
+the 0.80 profile. Both are recorded here rather than left in the internal
+ledger.
+
+**The allocator guard is boot-fatal.** The usual fragmentation countermeasure,
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, makes the head's guard
+kill the boot: on this unified-memory stack the allocator commits physical
+memory for its segments, and the head collapsed to 436 MB available against a
+4,096 MB floor. The identical profile without the variable boots in about
+seven minutes. The guard is a per-box host-memory floor, not an allocator
+hint — do not retry it.
+
+**An NVFP4 KV cache is a fork swap, not a flag.** The day-0 image refuses it
+on this silicon: the main attention raises `ValueError` off SM100, and the
+`nvfp4` indexer raises `NotImplementedError` ("needs the (not-yet-added)
+CuteDSL indexer impl"). The community pattern that does work on GB10 is a
+Triton inline-dequant mod — **+36% pool, 1M context** — at a lower
+single-stream decode (it ships eager; CUDA graphs regress on that build). It
+is a fork change; FlashInfer's SM120/121 NVFP4 backends may close the gap
+natively in a later image.
 
 ## The desk ladder: what a reader inherits (no boot, no window)
 

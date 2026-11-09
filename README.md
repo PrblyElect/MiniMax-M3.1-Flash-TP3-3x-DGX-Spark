@@ -59,8 +59,10 @@ deliberately: they are the recipe's spec claims, not a benchmark report.
 
 ## The numbers (measured, labeled, rounded)
 
-> Every row below is one measurement set at the shipped **196,608-token served
-> context**.
+> Throughput and acceptance rows were measured at **gmu 0.78**; the pool
+> row is the clean-head **gmu 0.80** measurement. The profile ships
+> 0.80 / 196,608, so the rows are labeled by the budget they came from
+> rather than presented as one set.
 
 | | |
 |---|---|
@@ -69,7 +71,7 @@ deliberately: they are the recipe's spec claims, not a benchmark report.
 | prefill (a ~8K-token prompt) | **~1,500 tok/s** |
 | time to first token | **~0.5 s** |
 | per-token latency | **~38 ms** |
-| KV pool | **~266K tokens** — **1.35×** a 196,608-token request (the same pool is **2.0×** a 131,072-token one) |
+| KV pool | **~224K tokens** at the 0.80 budget — **~1.14×** a 196,608-token request (the same pool is **~1.71×** a 131,072-token one) |
 | capture pool per rank | **under 1 GiB**, against the engine's own estimate of ~2 GiB |
 | draft acceptance, prose | **~0.60 / ~0.30 / ~0.14** per position |
 | draft acceptance, long reasoning chains | **~0.99 / ~0.96 / ~0.94** per position |
@@ -92,12 +94,16 @@ present and readable.
 
 **The pool is the capacity story, not the throughput story.** The engine's own
 concurrency figure is a property of **(pool / request length)**: the same
-pool reads ~2.0× at a 131,072-token request and ~1.35× at 196,608, because a
+pool reads ~1.71× at a 131,072-token request and ~1.14× at 196,608, because a
 request at the longer context uses almost all of it. At 196,608 the lane
 holds **one full-length request, not two** — that is the price of the longer
 context, and it is paid in concurrency, not in pool: the pool itself did not
 shrink to pay for it. Raising the pool further is not a configuration
-question on this stack — see "What the ceiling actually is" below.
+question on this stack — see "What the ceiling actually is" below. The 0.80
+pool is ~224K rather than higher because the engine subtracts its CUDA-graph
+memory-profiling estimate before sizing the KV cache: it reports 0.80 as
+equivalent to ~0.7819 without that profiling, and 0.8181 would be needed to
+keep the same effective KV.
 
 ## Quick start
 
