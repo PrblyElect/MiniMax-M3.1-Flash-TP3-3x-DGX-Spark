@@ -135,16 +135,15 @@ evidence. A future layout that puts heavy tenants back on the boxes owes
 this file the same honesty: re-price, lower `GMU`, and let the guard be the
 arbiter.
 
-## After the ladder: two later rungs the record should carry
+## After the ladder: two later findings
 
 Two experiments run after this ladder change what a reader should expect from
-the 0.80 profile. Both are recorded here rather than left in the internal
-ledger.
+the 0.80 profile.
 
 **The allocator guard is boot-fatal.** The usual fragmentation countermeasure,
 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, makes the head's guard
 kill the boot: on this unified-memory stack the allocator commits physical
-memory for its segments, and the head collapsed to 436 MB available against a
+memory for its segments, and the head collapsed to ~440 MB available against a
 4,096 MB floor. The identical profile without the variable boots in about
 seven minutes. The guard is a per-box host-memory floor, not an allocator
 hint — do not retry it.
